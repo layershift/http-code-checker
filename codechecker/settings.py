@@ -30,7 +30,7 @@ SECRET_KEY = 'django-insecure-#)h@282&(^!=#55s25phl1$lt9px7z1v!s%*0r@)(s_7xtchsz
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost','dontdeletezoltan.man-1.solus.stage.town']
 
 
 # Application definition
