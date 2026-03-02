@@ -1,1 +1,2 @@
 # http-code-checker
+Init
