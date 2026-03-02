@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.api",
     "apps.core",
+    "apps.monitoring",
 ]
 
 
@@ -81,6 +82,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'codechecker.wsgi.application'
 
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
