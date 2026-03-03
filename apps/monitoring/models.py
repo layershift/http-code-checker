@@ -106,7 +106,7 @@ class SiteSnapshot(models.Model):
         related_name="snapshots"
     )
 
-    screenshot = models.ImageField(upload_to=screenshot_upload_path, null=True, blank=True)
+    screenshot = models.ImageField(upload_to=screenshot_upload_path, null=True, blank=True, max_length=500)
 
     http_status_code = models.PositiveIntegerField(null=True, blank=True)
 
