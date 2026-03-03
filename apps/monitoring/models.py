@@ -120,3 +120,74 @@ class SiteSnapshot(models.Model):
         return f"{self.site.name} - {self.taken_at}"
 
 
+
+# models.py - Add this new model
+class ScreenshotComparison(models.Model):
+    """
+    Links two consecutive screenshots to track changes between monitoring runs
+    """
+    site = models.ForeignKey(
+        Site,
+        on_delete=models.CASCADE,
+        related_name="comparisons"
+    )
+
+    previous_snapshot = models.ForeignKey(
+        SiteSnapshot,
+        on_delete=models.CASCADE,
+        related_name="next_comparisons"
+    )
+
+    current_snapshot = models.ForeignKey(
+        SiteSnapshot,
+        on_delete=models.CASCADE,
+        related_name="previous_comparisons"
+    )
+
+    # Comparison metrics
+    ssim_score = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Structural Similarity Index (1 = identical, 0 = completely different)"
+    )
+
+    percent_difference = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Percentage of pixels that changed"
+    )
+
+    changed_pixels = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of pixels that changed"
+    )
+
+    total_pixels = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Total number of pixels in the image"
+    )
+
+    heatmap = models.ImageField(
+        upload_to='comparisons/heatmaps/',
+        null=True,
+        blank=True,
+        help_text="Visual heatmap showing changes"
+    )
+
+    diff_image = models.ImageField(
+        upload_to='comparisons/diffs/',
+        null=True,
+        blank=True,
+        help_text="Difference image highlighting changes"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ['previous_snapshot', 'current_snapshot']  # Prevent duplicates
+
+    def __str__(self):
+        return f"{self.site.name} - {self.previous_snapshot.taken_at} vs {self.current_snapshot.taken_at} (SSIM: {self.ssim_score:.3f})"

@@ -1,0 +1,328 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Change Detection Dashboard{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-center">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800">Change Detection Dashboard</h2>
+                <p class="text-gray-600">Monitor visual changes across all websites</p>
+            </div>
+            <div class="text-sm text-gray-500">
+                Last updated: {% now "Y-m-d H:i" %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-600 text-sm">Total Comparisons</p>
+                    <p class="text-3xl font-bold">{{ total_comparisons }}</p>
+                </div>
+                <div class="bg-blue-100 p-3 rounded-full">
+                    <i class="fas fa-chart-line text-blue-600 text-xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-600 text-sm">Average SSIM</p>
+                    <p class="text-3xl font-bold {% if avg_ssim > 0.95 %}text-green-600{% elif avg_ssim > 0.8 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                        {{ avg_ssim|floatformat:3 }}
+                    </p>
+                </div>
+                <div class="bg-green-100 p-3 rounded-full">
+                    <i class="fas fa-check-circle text-green-600 text-xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-600 text-sm">Significant Changes</p>
+                    <p class="text-3xl font-bold">{{ significant_changes|length }}</p>
+                </div>
+                <div class="bg-red-100 p-3 rounded-full">
+                    <i class="fas fa-exclamation-triangle text-red-600 text-xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-600 text-sm">Monitored Sites</p>
+                    <p class="text-3xl font-bold">{{ site_stats|length }}</p>
+                </div>
+                <div class="bg-purple-100 p-3 rounded-full">
+                    <i class="fas fa-globe text-purple-600 text-xl"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sites by Change Rate -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Sites with Most Changes</h3>
+            <span class="text-sm text-gray-500">Lower SSIM = More Changes</span>
+        </div>
+        
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead>
+                    <tr class="border-b">
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Site</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Comparisons</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Avg SSIM</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Avg Change %</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Max Change %</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Status</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Last Check</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for site in sites_by_changes %}
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="py-3 px-4">
+                            <a href="{% url 'site_detail' site.site__id %}" class="text-blue-600 hover:text-blue-800 font-medium">
+                                {{ site.site__name }}
+                            </a>
+                        </td>
+                        <td class="py-3 px-4">{{ site.total_comparisons }}</td>
+                        <td class="py-3 px-4 font-mono {% if site.avg_ssim > 0.95 %}text-green-600{% elif site.avg_ssim > 0.8 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                            {{ site.avg_ssim|floatformat:3 }}
+                        </td>
+                        <td class="py-3 px-4">{{ site.avg_change|floatformat:1 }}%</td>
+                        <td class="py-3 px-4">{{ site.max_change|floatformat:1 }}%</td>
+                        <td class="py-3 px-4">
+                            {% if site.avg_ssim > 0.95 %}
+                                <span class="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                                    Stable
+                                </span>
+                            {% elif site.avg_ssim > 0.8 %}
+                                <span class="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
+                                    Minor Changes
+                                </span>
+                            {% else %}
+                                <span class="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
+                                    Frequent Changes
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4 text-sm">{{ site.last_comparison|timesince }} ago</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-gray-500">
+                            No comparison data available yet
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Recent Significant Changes -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Recent Significant Changes (>5% difference)</h3>
+            <span class="text-sm text-gray-500">{{ significant_changes|length }} found</span>
+        </div>
+        
+        {% if significant_changes %}
+        <div class="space-y-4">
+            {% for change in significant_changes %}
+            <div class="border rounded-lg p-4 hover:shadow-md transition">
+                <div class="flex flex-col lg:flex-row gap-4">
+                    <!-- Site Info -->
+                    <div class="lg:w-1/4">
+                        <a href="{% url 'site_detail' change.site.id %}" class="text-lg font-semibold text-blue-600 hover:text-blue-800">
+                            {{ change.site.name }}
+                        </a>
+                        <div class="text-sm text-gray-500 mt-1">
+                            <i class="far fa-clock mr-1"></i>{{ change.created_at|date:"Y-m-d H:i:s" }}
+                        </div>
+                        <div class="text-sm text-gray-500">
+                            <i class="far fa-calendar-alt mr-1"></i>{{ change.created_at|timesince }} ago
+                        </div>
+                    </div>
+                    
+                    <!-- Thumbnails -->
+                    <div class="lg:w-1/3">
+                        <div class="flex items-center space-x-2">
+                            <div class="text-center">
+                                <img src="{{ change.previous_snapshot.screenshot.url }}" 
+                                     alt="Previous" 
+                                     class="w-32 h-24 object-cover rounded border-2 {% if change.percent_difference > 5 %}border-red-300{% endif %}"
+                                     onclick="openImageModal('{{ change.previous_snapshot.screenshot.url }}')">
+                                <span class="text-xs text-gray-500">{{ change.previous_snapshot.taken_at|date:"H:i" }}</span>
+                            </div>
+                            <div class="text-center">
+                                <i class="fas fa-arrow-right text-gray-400 text-xl"></i>
+                            </div>
+                            <div class="text-center">
+                                <img src="{{ change.current_snapshot.screenshot.url }}" 
+                                     alt="Current" 
+                                     class="w-32 h-24 object-cover rounded border-2 {% if change.percent_difference > 5 %}border-red-300{% endif %}"
+                                     onclick="openImageModal('{{ change.current_snapshot.screenshot.url }}')">
+                                <span class="text-xs text-gray-500">{{ change.current_snapshot.taken_at|date:"H:i" }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Metrics -->
+                    <div class="lg:w-1/3 grid grid-cols-2 gap-2">
+                        <div class="bg-gray-50 p-2 rounded text-center">
+                            <div class="text-xs text-gray-600">SSIM Score</div>
+                            <div class="text-lg font-semibold {% if change.ssim_score > 0.95 %}text-green-600{% elif change.ssim_score > 0.8 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                                {{ change.ssim_score|floatformat:3 }}
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 p-2 rounded text-center">
+                            <div class="text-xs text-gray-600">Change %</div>
+                            <div class="text-lg font-semibold text-red-600">
+                                {{ change.percent_difference|floatformat:1 }}%
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 p-2 rounded text-center">
+                            <div class="text-xs text-gray-600">Changed Pixels</div>
+                            <div class="text-lg font-semibold">{{ change.changed_pixels }}</div>
+                        </div>
+                        <div class="bg-gray-50 p-2 rounded text-center">
+                            <div class="text-xs text-gray-600">Time Diff</div>
+                            <div class="text-lg font-semibold">{{ change.previous_snapshot.taken_at|timesince:change.current_snapshot.taken_at }}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Actions -->
+                    <div class="lg:w-1/12 flex flex-col justify-center space-y-2">
+                        {% if change.heatmap %}
+                        <button onclick="openImageModal('{{ change.heatmap.url }}')" 
+                                class="text-blue-600 hover:text-blue-800 text-sm">
+                            <i class="fas fa-fire mr-1"></i>Heatmap
+                        </button>
+                        {% endif %}
+                        {% if change.diff_image %}
+                        <button onclick="openImageModal('{{ change.diff_image.url }}')" 
+                                class="text-purple-600 hover:text-purple-800 text-sm">
+                            <i class="fas fa-adjust mr-1"></i>Diff
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-center text-gray-500 py-8">No significant changes detected in recent comparisons</p>
+        {% endif %}
+    </div>
+
+    <!-- Recent Comparisons Timeline -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">Recent Comparison Activity</h3>
+        
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead>
+                    <tr class="border-b">
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Time</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Site</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">SSIM</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Change %</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Status</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Preview</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for comp in recent_comparisons %}
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="py-3 px-4 text-sm">{{ comp.created_at|timesince }} ago</td>
+                        <td class="py-3 px-4">
+                            <a href="{% url 'site_detail' comp.site.id %}" class="text-blue-600 hover:text-blue-800">
+                                {{ comp.site.name }}
+                            </a>
+                        </td>
+                        <td class="py-3 px-4 font-mono {% if comp.ssim_score > 0.95 %}text-green-600{% elif comp.ssim_score > 0.8 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                            {{ comp.ssim_score|floatformat:3 }}
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="{% if comp.percent_difference > 5 %}text-red-600 font-semibold{% endif %}">
+                                {{ comp.percent_difference|floatformat:1 }}%
+                            </span>
+                        </td>
+                        <td class="py-3 px-4">
+                            {% if comp.percent_difference < 1 %}
+                                <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Minimal</span>
+                            {% elif comp.percent_difference < 5 %}
+                                <span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">Minor</span>
+                            {% else %}
+                                <span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">Major</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4">
+                            {% if comp.heatmap %}
+                            <button onclick="openImageModal('{{ comp.heatmap.url }}')" class="text-blue-600 hover:text-blue-800 text-sm">
+                                <i class="fas fa-image"></i>
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="py-8 text-center text-gray-500">
+                            No comparison data available yet
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Image Modal -->
+<div id="imageModal" class="fixed inset-0 bg-black bg-opacity-75 hidden z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeImageModal()">
+    <div class="relative max-w-6xl max-h-screen">
+        <button onclick="closeImageModal()" class="absolute -top-10 right-0 text-white hover:text-gray-300 text-2xl">
+            <i class="fas fa-times"></i>
+        </button>
+        <img id="modalImage" src="" alt="Full size image" class="max-w-full max-h-[90vh] rounded-lg shadow-2xl">
+        <div id="modalCaption" class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm rounded-b-lg">
+        </div>
+    </div>
+</div>
+
+<script>
+function openImageModal(imageUrl, caption) {
+    document.getElementById('modalImage').src = imageUrl;
+    document.getElementById('modalCaption').innerHTML = caption || '';
+    document.getElementById('imageModal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeImageModal() {
+    document.getElementById('imageModal').classList.add('hidden');
+    document.body.style.overflow = 'auto';
+}
+
+// Close with Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeImageModal();
+    }
+});
+</script>
+{% endblock %}

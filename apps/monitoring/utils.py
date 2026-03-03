@@ -1,7 +1,6 @@
-# monitoring/utils.py
+# monitoring/utils.py - Updated with better logging
 import os
 import tempfile
-import threading
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db import close_old_connections
@@ -11,120 +10,168 @@ def capture_screenshot_for_snapshot(snapshot_id):
     """
     Thread function to capture screenshot for a snapshot
     """
-    # Close any existing connections before starting thread work
+    print(f"🔍 Starting screenshot capture for snapshot ID: {snapshot_id}")
     close_old_connections()
     
     temp_path = None
     
     try:
-        # Import inside thread to avoid circular imports
-        from .models import SiteSnapshot
+        from .models import SiteSnapshot, ScreenshotComparison
         
-        # Get the snapshot with a fresh connection
+        # Get the snapshot
         snapshot = SiteSnapshot.objects.get(id=snapshot_id)
-        print(f"Processing screenshot for {snapshot.site.name}")
+        print(f"✅ Found snapshot for site: {snapshot.site.name}")
         
         # Create temp file
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
             temp_path = tmp_file.name
+            print(f"📁 Created temp file: {temp_path}")
 
         # Prepare URL
         url = snapshot.site.name
         if not url.startswith(('http://', 'https://')):
             url = 'http://' + url
+        print(f"🌐 Accessing URL: {url}")
 
         status_code = 500
         content_length = 0
         screenshot_data = None
 
-        # Use sync Playwright - this part is fine
+        # Take screenshot with Playwright
+        print("🚀 Launching Playwright...")
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
                 args=["--no-sandbox", "--disable-gpu"]
             )
+            print("✅ Browser launched")
 
             page = browser.new_page(viewport={"width": 1920, "height": 1080})
+            print("✅ Page created")
 
             try:
-                # Navigate to URL
+                print(f"⏳ Navigating to {url}...")
                 response = page.goto(url, wait_until="networkidle", timeout=30000)
                 status_code = response.status if response else 500
+                print(f"✅ Got status code: {status_code}")
                 
-                # Take screenshot
+                print("📸 Taking screenshot...")
                 page.screenshot(path=temp_path, full_page=True)
+                print("✅ Screenshot taken")
                 
-                # Get content
                 content = page.content()
                 content_length = len(content.encode('utf-8'))
+                print(f"📊 Content length: {content_length}")
 
-                # Read screenshot file
                 with open(temp_path, 'rb') as f:
                     screenshot_data = f.read()
-                    
+                print(f"💾 Screenshot size: {len(screenshot_data)} bytes")
+
             except Exception as e:
-                print(f"Browser error for {url}: {e}")
+                print(f"❌ Browser error: {e}")
                 status_code = 500
                 content_length = 0
                 
             finally:
                 browser.close()
+                print("✅ Browser closed")
 
-        # NOW update Django model - with fresh connection
-        try:
-            # Close old connections and get fresh snapshot
-            close_old_connections()
-            
-            # Get a fresh copy of the snapshot
-            from .models import SiteSnapshot
-            snapshot = SiteSnapshot.objects.get(id=snapshot_id)
-            
-            # Update fields
-            snapshot.http_status_code = status_code
-            snapshot.content_length = content_length
+        # Update snapshot
+        print("💾 Updating snapshot in database...")
+        snapshot.http_status_code = status_code
+        snapshot.content_length = content_length
 
-            # Save screenshot if we have one
-            if screenshot_data and status_code and status_code < 400:
-                filename = f"{snapshot.site.name}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.png"
-                print(f"Saving screenshot as: {filename}")
-                
-                # This operation should be fine as it's in the same thread
-                snapshot.screenshot.save(
-                    filename,
-                    ContentFile(screenshot_data),
-                    save=True
-                )
-                print("Screenshot saved successfully!")
-            else:
-                print(f"Saving snapshot without screenshot (status: {status_code})")
-                snapshot.save()
-                
-        except Exception as db_error:
-            print(f"Database error: {db_error}")
+        if screenshot_data and status_code and status_code < 400:
+            filename = f"{snapshot.site.name}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.png"
+            print(f"💾 Saving screenshot as: {filename}")
+            snapshot.screenshot.save(
+                filename,
+                ContentFile(screenshot_data),
+                save=True
+            )
+            print("✅ Screenshot saved to database")
+        else:
+            print(f"💾 Saving snapshot without screenshot (status: {status_code})")
+            snapshot.save()
+
+        # 🔥 NEW: Create comparison with previous snapshot
+        print("🔍 Checking for previous snapshot to compare...")
+        previous_snapshot = SiteSnapshot.objects.filter(
+            site=snapshot.site,
+            screenshot__isnull=False
+        ).exclude(id=snapshot.id).order_by('-taken_at').first()
+
+        if previous_snapshot:
+            print(f"✅ Found previous snapshot ID: {previous_snapshot.id} from {previous_snapshot.taken_at}")
             
-            # One more try with a completely new connection
             try:
-                close_old_connections()
-                from .models import SiteSnapshot
-                snapshot = SiteSnapshot.objects.get(id=snapshot_id)
-                snapshot.http_status_code = status_code
-                snapshot.content_length = content_length
-                snapshot.save()
-                print("Recovery save successful")
-            except Exception as final_error:
-                print(f"Final recovery failed: {final_error}")
-
+                # Import comparison function
+                from .comparison import compare_screenshots
+                
+                # Create temp directory for comparison images
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    print(f"📁 Created temp dir for comparison: {temp_dir}")
+                    
+                    # Compare screenshots
+                    result = compare_screenshots(previous_snapshot, snapshot, output_dir=temp_dir)
+                    
+                    if result['ssim_score'] is not None:
+                        print(f"📊 Comparison results: SSIM={result['ssim_score']:.4f}, "
+                              f"Diff={result['percent_difference']:.2f}%")
+                        
+                        # Create ScreenshotComparison object
+                        comparison = ScreenshotComparison.objects.create(
+                            site=snapshot.site,
+                            previous_snapshot=previous_snapshot,
+                            current_snapshot=snapshot,
+                            ssim_score=result['ssim_score'],
+                            percent_difference=result['percent_difference'],
+                            changed_pixels=result['changed_pixels'],
+                            total_pixels=result['total_pixels']
+                        )
+                        print(f"✅ Created comparison ID: {comparison.id}")
+                        
+                        # Save heatmap if generated
+                        if result.get('heatmap_image_path') and os.path.exists(result['heatmap_image_path']):
+                            with open(result['heatmap_image_path'], 'rb') as f:
+                                heatmap_data = f.read()
+                            comparison.heatmap.save(
+                                f"heatmap_{previous_snapshot.id}_vs_{snapshot.id}.png",
+                                ContentFile(heatmap_data)
+                            )
+                            print("✅ Saved heatmap")
+                        
+                        # Save diff image if generated
+                        if result.get('diff_image_path') and os.path.exists(result['diff_image_path']):
+                            with open(result['diff_image_path'], 'rb') as f:
+                                diff_data = f.read()
+                            comparison.diff_image.save(
+                                f"diff_{previous_snapshot.id}_vs_{snapshot.id}.png",
+                                ContentFile(diff_data)
+                            )
+                            print("✅ Saved diff image")
+                    else:
+                        print("❌ Comparison failed - no results")
+                        
+            except Exception as e:
+                print(f"❌ Error creating comparison: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("📭 No previous snapshot found for comparison")
+            
     except Exception as e:
-        print(f"Critical error in screenshot thread: {e}")
+        print(f"❌ Critical error in screenshot thread: {e}")
+        import traceback
+        traceback.print_exc()
         
     finally:
-        # Clean up temp file
         if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
-                print(f"Cleaned up temp file: {temp_path}")
+                print(f"🧹 Cleaned up temp file: {temp_path}")
             except:
                 pass
         
-        # Close connections at the end
         close_old_connections()
+        print("🏁 Screenshot capture completed")

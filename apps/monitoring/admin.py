@@ -4,7 +4,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.contrib import messages
 import threading
-from .models import Site, Server, SiteSnapshot
+from .models import Site, Server, SiteSnapshot, ScreenshotComparison
 from .utils import capture_screenshot_for_snapshot
 
 class SiteSnapshotInline(admin.TabularInline):
@@ -195,3 +195,41 @@ class ServerAdmin(admin.ModelAdmin):
     def site_count(self, obj):
         return obj.domains.count()
     site_count.short_description = "Sites"
+
+
+@admin.register(ScreenshotComparison)
+class ScreenshotComparisonAdmin(admin.ModelAdmin):
+    list_display = ['site', 'created_at', 'ssim_score', 'percent_difference', 'changed_pixels', 'total_pixels']
+    list_filter = ['site', 'created_at', 'ssim_score']
+
+    # Fields that will be shown
+    fieldsets = (
+        ('Comparison Info', {
+            'fields': ('site', 'created_at')
+        }),
+        ('Snapshots', {
+            'fields': ('previous_snapshot', 'current_snapshot')
+        }),
+        ('Metrics', {
+            'fields': ('ssim_score', 'percent_difference', 'changed_pixels', 'total_pixels')
+        }),
+        ('Images', {
+            'fields': ('heatmap', 'diff_image', 'heatmap_preview', 'diff_preview'),
+            'classes': ('wide',)
+        }),
+    )
+
+    # Make these fields readonly
+    readonly_fields = ['created_at', 'heatmap_preview', 'diff_preview']
+
+    def heatmap_preview(self, obj):
+        if obj and obj.heatmap:
+            return format_html('<img src="{}" width="300" style="border-radius: 4px;" />', obj.heatmap.url)
+        return "No heatmap"
+    heatmap_preview.short_description = "Heatmap Preview"
+
+    def diff_preview(self, obj):
+        if obj and obj.diff_image:
+            return format_html('<img src="{}" width="300" style="border-radius: 4px;" />', obj.diff_image.url)
+        return "No diff image"
+    diff_preview.short_description = "Difference Preview"
