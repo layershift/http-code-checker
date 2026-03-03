@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "apps.api",
     "apps.core",
     "apps.monitoring.apps.MonitoringConfig",
+    "apps.infrastructure"
 ]
 
 
