@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ site.name }} - Site Details{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-start">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800">{{ site.name }}</h2>
+                <p class="text-gray-600">Created: {{ site.created_at|date:"F j, Y" }}</p>
+            </div>
+            <div class="flex space-x-2">
+                <span class="px-3 py-1 text-sm font-medium rounded-full {% if site.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                    {{ site.is_active|yesno:"Active,Inactive" }}
+                </span>
+                <a href="{% url 'site_list' %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">
+                    <i class="fas fa-arrow-left mr-2"></i>Back
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Site Information -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Server Info -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Server Information</h3>
+            <div class="space-y-3">
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Server Name:</span>
+                    <a href="{% url 'server_detail' site.server.pk %}" class="text-blue-600 hover:text-blue-800 font-medium">
+                        {{ site.server.name }}
+                    </a>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Server IP:</span>
+                    <span class="font-medium">{{ site.server_ip.ip_address|default:"Not assigned" }}</span>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Resolved IP:</span>
+                    <span class="font-medium">{{ site.resolved_ip.ip_address|default:"Not resolved" }}</span>
+                </div>
+                {% if site.server_ip and site.server_ip.ip_class %}
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">IP Class:</span>
+                    <span class="font-medium">{{ site.server_ip.ip_class.name }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Latest Snapshot -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Latest Snapshot</h3>
+            {% if latest_snapshot %}
+            <div class="space-y-3">
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">HTTP Status:</span>
+                    <span class="font-medium px-2 py-1 rounded-full 
+                        {% if latest_snapshot.http_status_code == 200 %}bg-green-100 text-green-800
+                        {% elif latest_snapshot.http_status_code >= 400 %}bg-red-100 text-red-800
+                        {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                        {{ latest_snapshot.http_status_code }}
+                    </span>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Taken at:</span>
+                    <span class="font-medium">{{ latest_snapshot.taken_at|date:"Y-m-d H:i:s" }}</span>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Time ago:</span>
+                    <span class="font-medium">{{ latest_snapshot.taken_at|timesince }} ago</span>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-center py-4">No snapshots available</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Snapshots History -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">Snapshot History</h3>
+        
+        {% if snapshots %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead>
+                    <tr class="border-b">
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">HTTP Status</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Taken At</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Time Ago</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for snapshot in snapshots %}
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-1 text-xs font-medium rounded-full
+                                {% if snapshot.http_status_code == 200 %}bg-green-100 text-green-800
+                                {% elif snapshot.http_status_code >= 400 %}bg-red-100 text-red-800
+                                {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                                {{ snapshot.http_status_code }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 text-sm">{{ snapshot.taken_at|date:"Y-m-d H:i:s" }}</td>
+                        <td class="py-3 px-4 text-sm">{{ snapshot.taken_at|timesince }} ago</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-center text-gray-500 py-4">No snapshots available</p>
+        {% endif %}
+    </div>
+
+    <!-- Other Sites on Same Server -->
+    {% if same_server_sites %}
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">Other Sites on Same Server</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {% for other_site in same_server_sites %}
+            <a href="{% url 'site_detail' other_site.pk %}" class="border rounded-lg p-4 hover:shadow-md transition">
+                <h4 class="font-medium text-blue-600 hover:text-blue-800">{{ other_site.name|truncatechars:30 }}</h4>
+                <p class="text-sm text-gray-500 mt-1">IP: {{ other_site.server_ip.ip_address|default:"N/A" }}</p>
+                <span class="text-xs mt-2 inline-block px-2 py-1 rounded-full {% if other_site.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                    {{ other_site.is_active|yesno:"Active,Inactive" }}
+                </span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

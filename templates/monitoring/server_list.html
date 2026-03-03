@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+
+{% block title %}Servers - Monitoring{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-center">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800">Servers</h2>
+                <p class="text-gray-600">Total: {{ total_servers }} servers</p>
+            </div>
+            <a href="#" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                <i class="fas fa-plus mr-2"></i>Add Server
+            </a>
+        </div>
+    </div>
+
+    <!-- Server Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for server in servers %}
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <div class="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4">
+                <h3 class="text-xl font-bold text-white">{{ server.name }}</h3>
+            </div>
+            <div class="p-6">
+                <div class="flex justify-between mb-4">
+                    <div class="text-center">
+                        <span class="block text-2xl font-bold text-gray-800">{{ server.site_count }}</span>
+                        <span class="text-sm text-gray-500">Total Sites</span>
+                    </div>
+                    <div class="text-center">
+                        <span class="block text-2xl font-bold text-green-600">{{ server.active_site_count }}</span>
+                        <span class="text-sm text-gray-500">Active</span>
+                    </div>
+                    <div class="text-center">
+                        <span class="block text-2xl font-bold text-red-600">{{ server.site_count|add:"-"|add:server.active_site_count }}</span>
+                        <span class="text-sm text-gray-500">Inactive</span>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="mb-4">
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="text-gray-600">Health</span>
+                        <span class="text-gray-800 font-medium">
+                            {% widthratio server.active_site_count server.site_count 100 %}%
+                        </span>
+                    </div>
+                    <div class="w-full h-2 bg-gray-200 rounded-full">
+                        <div class="h-2 bg-green-500 rounded-full" style="width: {% widthratio server.active_site_count server.site_count 100 %}%"></div>
+                    </div>
+                </div>
+
+                <!-- Recent Sites -->
+                <div class="mb-4">
+                    <h4 class="text-sm font-medium text-gray-700 mb-2">Recent Sites</h4>
+                    {% with server.sites.all|slice:":3" as recent_sites %}
+                        {% for site in recent_sites %}
+                        <div class="flex justify-between items-center py-1">
+                            <span class="text-sm text-gray-600">{{ site.name|truncatechars:20 }}</span>
+                            {% if site.is_active %}
+                            <span class="text-xs text-green-600">Active</span>
+                            {% else %}
+                            <span class="text-xs text-red-600">Inactive</span>
+                            {% endif %}
+                        </div>
+                        {% empty %}
+                        <p class="text-sm text-gray-500">No sites</p>
+                        {% endfor %}
+                    {% endwith %}
+                </div>
+
+                <a href="{% url 'server_detail' server.pk %}" class="block w-full text-center bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200 transition">
+                    View Details
+                </a>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-span-3 text-center py-12">
+            <i class="fas fa-server text-4xl text-gray-400 mb-4"></i>
+            <p class="text-gray-500 text-lg">No servers found</p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Pagination -->
+    {% if is_paginated %}
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="flex justify-center space-x-2">
+            {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Previous</a>
+            {% endif %}
+            
+            <span class="px-3 py-1 bg-blue-600 text-white rounded">
+                Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+            </span>
+            
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
