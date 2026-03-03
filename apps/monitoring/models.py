@@ -68,7 +68,29 @@ class Site(models.Model):
     is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
-
+    
+    def resolve_ip(self):
+        """
+        Resolve the IPv4 address of the site
+        """
+        try:
+            # Get all IP addresses
+            ip_list = socket.gethostbyname_ex(self.name)[2]
+            
+            # Filter for IPv4 addresses (they're already IPv4 from gethostbyname_ex)
+            if ip_list:
+                # Store the first IPv4 address
+                self.resolved_ip = ip_list[0]
+                return self.resolved_ip
+            else:
+                return None
+        except socket.gaierror as e:
+            print(f"DNS resolution failed for {self.name}: {e}")
+            return None
+        except Exception as e:
+            print(f"Error resolving IP for {self.name}: {e}")
+            return None
+    
     def __str__(self):
         return self.name
 

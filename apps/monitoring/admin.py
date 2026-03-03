@@ -164,6 +164,7 @@ class SiteAdmin(admin.ModelAdmin):
     snapshot_count.short_description = "Snapshots"
 
     def snapshot_quick_view(self, obj):
+        """Display recent snapshots in admin"""
         snapshots = obj.snapshots.order_by('-taken_at')[:5]
         if not snapshots:
             return "No snapshots yet"
@@ -171,17 +172,17 @@ class SiteAdmin(admin.ModelAdmin):
         html = '<div style="display: flex; gap: 10px; flex-wrap: wrap;">'
         for snapshot in snapshots:
             if snapshot.screenshot:
-                html += format_html(
-                    '<div style="text-align: center;">'
-                    '<img src="{}" width="100" style="border-radius: 4px;" />'
-                    '<br/><small>{} - {}</small>'
-                    '</div>',
-                    snapshot.screenshot.url,
-                    snapshot.taken_at.strftime('%Y-%m-%d'),
-                    snapshot.http_status_code
-                )
+                # FIXED: Build HTML string first, then use mark_safe
+                html += f'''
+                    <div style="text-align: center;">
+                        <img src="{snapshot.screenshot.url}" width="100" style="border-radius: 4px;" />
+                        <br/>
+                        <small>{snapshot.taken_at.strftime('%Y-%m-%d')} - {snapshot.http_status_code}</small>
+                    </div>
+                '''
         html += '</div>'
-        return format_html(html)
+        from django.utils.safestring import mark_safe
+        return mark_safe(html)
     snapshot_quick_view.short_description = "Recent Snapshots"
 
 @admin.register(Server)
