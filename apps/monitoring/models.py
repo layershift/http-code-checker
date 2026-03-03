@@ -4,6 +4,7 @@ from django.db import models
 import ipaddress
 from django.utils import timezone
 import os 
+import socket
 
 
 def screenshot_upload_path(instance, filename):

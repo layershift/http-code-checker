@@ -149,13 +149,15 @@ class SiteAdmin(admin.ModelAdmin):
         }),
         ('IP Information', {
             'fields': ('server_ip', 'resolved_ip'),
-            'classes': ('collapse',)
+            'description': 'Server ip: Manually assigned IP (optional)<br>Resolved ip: Automatically resolved from DNS'
         }),
         ('Snapshots', {
             'fields': ('snapshot_quick_view',),
             'classes': ('collapse',)
         }),
     )
+    
+    actions = ['resolve_ips_selected']
 
     def snapshot_count(self, obj):
         count = obj.snapshots.count()

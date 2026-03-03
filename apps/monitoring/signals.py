@@ -14,7 +14,8 @@ from .models import Site, SiteSnapshot
 def create_initial_snapshot(sender, instance, created, **kwargs):
     if created:
         try:
-            # Create snapshot first
+            instance.resolve_ip()
+            instance.save()
             snapshot = SiteSnapshot.objects.create(
                 site=instance,
                 http_status_code=0,
