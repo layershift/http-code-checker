@@ -36,11 +36,11 @@
                 </div>
                 <div class="flex justify-between py-2 border-b">
                     <span class="text-gray-600">Server IP:</span>
-                    <span class="font-medium">{{ site.server_ip.ip_address|default:"Not assigned" }}</span>
+                    <span class="font-medium">{{ site.server_ip|default:"Not assigned" }}</span>
                 </div>
                 <div class="flex justify-between py-2 border-b">
                     <span class="text-gray-600">Resolved IP:</span>
-                    <span class="font-medium">{{ site.resolved_ip.ip_address|default:"Not resolved" }}</span>
+                    <span class="font-medium">{{ site.resolved_ip|default:"Not resolved" }}</span>
                 </div>
                 {% if site.server_ip and site.server_ip.ip_class %}
                 <div class="flex justify-between py-2 border-b">
@@ -58,7 +58,7 @@
             <div class="space-y-3">
                 <div class="flex justify-between py-2 border-b">
                     <span class="text-gray-600">HTTP Status:</span>
-                    <span class="font-medium px-2 py-1 rounded-full 
+                    <span class="font-medium px-2 py-1 rounded-full
                         {% if latest_snapshot.http_status_code == 200 %}bg-green-100 text-green-800
                         {% elif latest_snapshot.http_status_code >= 400 %}bg-red-100 text-red-800
                         {% else %}bg-yellow-100 text-yellow-800{% endif %}">
@@ -73,6 +73,14 @@
                     <span class="text-gray-600">Time ago:</span>
                     <span class="font-medium">{{ latest_snapshot.taken_at|timesince }} ago</span>
                 </div>
+                {% if latest_snapshot.screenshot %}
+                <div class="mt-4">
+                    <button onclick="document.getElementById('latestScreenshotModal').classList.remove('hidden')" 
+                            class="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                        <i class="fas fa-image mr-1"></i>View Latest Screenshot
+                    </button>
+                </div>
+                {% endif %}
             </div>
             {% else %}
             <p class="text-gray-500 text-center py-4">No snapshots available</p>
@@ -80,10 +88,66 @@
         </div>
     </div>
 
+    <!-- NEW: Screenshots Gallery Section -->
+    {% if snapshots_with_screenshots %}
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Screenshots Gallery</h3>
+            <span class="text-sm text-gray-500">{{ snapshots_with_screenshots.count }} screenshot{{ snapshots_with_screenshots.count|pluralize }}</span>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% for snapshot in snapshots_with_screenshots %}
+            <div class="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow">
+                <!-- Thumbnail -->
+                <div class="aspect-video bg-gray-100 relative group">
+                    {% if snapshot.screenshot %}
+                    <img src="{{ snapshot.screenshot.url }}" 
+                         alt="Screenshot of {{ site.name }} taken on {{ snapshot.taken_at|date:'Y-m-d H:i' }}"
+                         class="w-full h-full object-cover cursor-pointer"
+                         onclick="openModal('{{ snapshot.screenshot.url }}', '{{ snapshot.taken_at|date:'Y-m-d H:i:s' }}', '{{ snapshot.http_status_code }}')">
+                    <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                        <span class="bg-white text-gray-800 px-3 py-1 rounded-full text-sm shadow-lg">
+                            <i class="fas fa-search-plus mr-1"></i>Click to enlarge
+                        </span>
+                    </div>
+                    {% else %}
+                    <div class="w-full h-full flex items-center justify-center bg-gray-200">
+                        <span class="text-gray-400">No screenshot</span>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <!-- Metadata -->
+                <div class="p-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-sm text-gray-600">
+                            <i class="far fa-calendar-alt mr-1"></i>{{ snapshot.taken_at|date:"Y-m-d H:i" }}
+                        </span>
+                        <span class="px-2 py-1 text-xs font-medium rounded-full
+                            {% if snapshot.http_status_code == 200 %}bg-green-100 text-green-800
+                            {% elif snapshot.http_status_code >= 400 %}bg-red-100 text-red-800
+                            {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                            {{ snapshot.http_status_code }}
+                        </span>
+                    </div>
+                    <div class="text-xs text-gray-500 flex justify-between">
+                        <span><i class="far fa-clock mr-1"></i>{{ snapshot.taken_at|timesince }} ago</span>
+                        {% if snapshot.content_length %}
+                        <span><i class="fas fa-file-alt mr-1"></i>{{ snapshot.content_length|filesizeformat }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Snapshots History -->
     <div class="bg-white rounded-lg shadow p-6">
         <h3 class="text-lg font-semibold text-gray-800 mb-4">Snapshot History</h3>
-        
+
         {% if snapshots %}
         <div class="overflow-x-auto">
             <table class="min-w-full">
@@ -92,6 +156,8 @@
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">HTTP Status</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Taken At</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Time Ago</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Content Length</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Screenshot</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -107,6 +173,17 @@
                         </td>
                         <td class="py-3 px-4 text-sm">{{ snapshot.taken_at|date:"Y-m-d H:i:s" }}</td>
                         <td class="py-3 px-4 text-sm">{{ snapshot.taken_at|timesince }} ago</td>
+                        <td class="py-3 px-4 text-sm">{{ snapshot.content_length|default:"N/A" }}</td>
+                        <td class="py-3 px-4 text-sm">
+                            {% if snapshot.screenshot %}
+                            <button onclick="openModal('{{ snapshot.screenshot.url }}', '{{ snapshot.taken_at|date:'Y-m-d H:i:s' }}', '{{ snapshot.http_status_code }}')" 
+                                    class="text-blue-600 hover:text-blue-800">
+                                <i class="fas fa-image mr-1"></i>View
+                            </button>
+                            {% else %}
+                            <span class="text-gray-400">No screenshot</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -125,7 +202,7 @@
             {% for other_site in same_server_sites %}
             <a href="{% url 'site_detail' other_site.pk %}" class="border rounded-lg p-4 hover:shadow-md transition">
                 <h4 class="font-medium text-blue-600 hover:text-blue-800">{{ other_site.name|truncatechars:30 }}</h4>
-                <p class="text-sm text-gray-500 mt-1">IP: {{ other_site.server_ip.ip_address|default:"N/A" }}</p>
+                <p class="text-sm text-gray-500 mt-1">IP: {{ other_site.server_ip|default:"N/A" }}</p>
                 <span class="text-xs mt-2 inline-block px-2 py-1 rounded-full {% if other_site.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
                     {{ other_site.is_active|yesno:"Active,Inactive" }}
                 </span>
@@ -135,4 +212,54 @@
     </div>
     {% endif %}
 </div>
+
+<!-- Modal for full-size image -->
+<div id="screenshotModal" class="fixed inset-0 bg-black bg-opacity-75 hidden z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeModal()">
+    <div class="relative max-w-6xl max-h-screen">
+        <button onclick="closeModal()" class="absolute -top-10 right-0 text-white hover:text-gray-300 text-2xl">
+            <i class="fas fa-times"></i>
+        </button>
+        <img id="modalImage" src="" alt="Screenshot" class="max-w-full max-h-[90vh] rounded-lg shadow-2xl">
+        <div id="modalCaption" class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm rounded-b-lg">
+        </div>
+    </div>
+</div>
+
+<script>
+function openModal(imageUrl, takenAt, statusCode) {
+    document.getElementById('modalImage').src = imageUrl;
+    document.getElementById('modalCaption').innerHTML = `Taken: ${takenAt} | HTTP Status: ${statusCode}`;
+    document.getElementById('screenshotModal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+    document.getElementById('screenshotModal').classList.add('hidden');
+    document.body.style.overflow = 'auto';
+}
+
+// Close modal with Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeModal();
+    }
+});
+</script>
+
+<style>
+/* Add smooth transitions for the modal */
+#screenshotModal {
+    transition: opacity 0.3s ease;
+}
+
+#screenshotModal.hidden {
+    display: none;
+}
+
+/* Ensure images don't drag accidentally */
+img {
+    user-select: none;
+    -webkit-user-drag: none;
+}
+</style>
 {% endblock %}

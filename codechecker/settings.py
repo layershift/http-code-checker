@@ -32,6 +32,7 @@ SECRET_KEY = 'django-insecure-#)h@282&(^!=#55s25phl1$lt9px7z1v!s%*0r@)(s_7xtchsz
 DEBUG = True
 
 ALLOWED_HOSTS = ast.literal_eval(os.getenv("ALLOWED_HOSTS", "[]"))
+CSRF_TRUSTED_ORIGINS = ["https://dontdeletezoltan.man-1.solus.stage.town"]
 
 
 # Application definition

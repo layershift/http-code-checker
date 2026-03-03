@@ -2,7 +2,28 @@ from django.db import models
 from django.core.validators import validate_ipv46_address
 from django.db import models
 import ipaddress
+from django.utils import timezone
+import os 
 
+
+def screenshot_upload_path(instance, filename):
+    """
+    Generate upload path: screenshots/site_name/timestamp_filename
+    """
+    # Sanitize site name for filesystem (replace spaces/special chars)
+    site_name = instance.site.name.replace(' ', '_').lower()
+    
+    # Create timestamp for filename
+    timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Keep original extension
+    ext = filename.split('.')[-1]
+    
+    # New filename: site_name_timestamp.png
+    new_filename = f"{site_name}_{timestamp}.{ext}"
+    
+    # Full path: screenshots/site_name/timestamp_filename
+    return os.path.join('screenshots', site_name, new_filename)
 
 
 class Server(models.Model):
@@ -62,9 +83,9 @@ class SiteSnapshot(models.Model):
         related_name="snapshots"
     )
 
-    screenshot = models.ImageField(upload_to="screenshots/")
+    screenshot = models.ImageField(upload_to=screenshot_upload_path, null=True, blank=True)
 
-    http_status_code = models.PositiveIntegerField()
+    http_status_code = models.PositiveIntegerField(null=True, blank=True)
 
     content_length = models.PositiveIntegerField(null=True, blank=True)
 

@@ -127,6 +127,7 @@ class SiteListView(ListView):
 
 
 # Site detail view
+# Site detail view
 class SiteDetailView(DetailView):
     model = Site
     template_name = 'monitoring/site_detail.html'
@@ -134,11 +135,22 @@ class SiteDetailView(DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        # Get snapshots for this site
-        context['snapshots'] = self.object.snapshots.all().order_by('-taken_at')[:10]
-        context['latest_snapshot'] = self.object.snapshots.order_by('-taken_at').first()
+        
+        # Get all snapshots for this site
+        all_snapshots = self.object.snapshots.all().order_by('-taken_at')
+        
+        # For the history table - show all
+        context['snapshots'] = all_snapshots
+        
+        # For the gallery - only those with screenshots
+        context['snapshots_with_screenshots'] = all_snapshots.exclude(
+            screenshot=''
+        )
+        
+        # Latest snapshot
+        context['latest_snapshot'] = all_snapshots.first()
 
-        # Get all sites on the same server
+        # Same server sites
         context['same_server_sites'] = Site.objects.filter(
             server=self.object.server
         ).exclude(
@@ -146,7 +158,6 @@ class SiteDetailView(DetailView):
         )[:5]
 
         return context
-
 
 # API-like views for AJAX requests (optional)
 def get_server_stats(request, pk):
