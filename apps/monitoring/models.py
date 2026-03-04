@@ -5,7 +5,7 @@ import ipaddress
 from django.utils import timezone
 import os 
 import socket
-
+from django.urls import reverse
 
 def screenshot_upload_path(instance, filename):
     """
@@ -98,6 +98,10 @@ class Site(models.Model):
         except Exception as e:
             print(f"Error resolving IP for {self.name}: {e}")
             return None
+        
+    def get_absolute_url(self):
+        """Return the URL to access this specific site"""
+        return reverse('site_detail', args=[str(self.id)])
     
     def __str__(self):
         return self.name

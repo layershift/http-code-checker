@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 
 {% block title %}{{ server.name }} - Server Details{% endblock %}
 
@@ -6,99 +7,201 @@
 <div class="space-y-6">
     <!-- Header -->
     <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex justify-between items-start">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
                 <h2 class="text-2xl font-bold text-gray-800">{{ server.name }}</h2>
                 <p class="text-gray-600">Created: {{ server.created_at|date:"F j, Y" }}</p>
             </div>
             <div class="flex space-x-2">
-                <a href="#" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
-                    <i class="fas fa-edit mr-2"></i>Edit
-                </a>
                 <a href="{% url 'server_list' %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">
-                    <i class="fas fa-arrow-left mr-2"></i>Back
+                    <i class="fas fa-arrow-left mr-2"></i>Back to Servers
                 </a>
             </div>
         </div>
     </div>
 
-    <!-- Stats Cards -->
+    <!-- Server Information -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Server Info Card -->
         <div class="bg-white rounded-lg shadow p-6">
-            <div class="flex items-center">
-                <div class="bg-blue-500 rounded-full p-3 mr-4">
-                    <i class="fas fa-globe text-white text-xl"></i>
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Server Information</h3>
+            <div class="space-y-3">
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Server Name:</span>
+                    <span class="font-medium">{{ server.name }}</span>
                 </div>
-                <div>
-                    <p class="text-gray-500 text-sm">Total Domains</p>
-                    <p class="text-2xl font-bold text-gray-800">{{ sites|length }}</p>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">IP Address:</span>
+                    <span class="font-mono {% if server.ip_address %}text-gray-800{% else %}text-gray-400{% endif %}">
+                        {% if server.ip_address %}
+                            {{ server.ip_address }}
+                        {% else %}
+                            <span class="text-gray-400">Not configured</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Description:</span>
+                    <span class="text-gray-800">{{ server.description|default:"No description" }}</span>
                 </div>
             </div>
         </div>
 
+        <!-- Statistics Card -->
         <div class="bg-white rounded-lg shadow p-6">
-            <div class="flex items-center">
-                <div class="bg-green-500 rounded-full p-3 mr-4">
-                    <i class="fas fa-check-circle text-white text-xl"></i>
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Statistics</h3>
+            <div class="space-y-3">
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Total Sites:</span>
+                    <span class="font-medium">{{ total_sites }}</span>
                 </div>
-                <div>
-                    <p class="text-gray-500 text-sm">Active Domains</p>
-                    <p class="text-2xl font-bold text-green-600">{{ active_sites }}</p>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Active Sites:</span>
+                    <span class="font-medium text-green-600">{{ active_sites }}</span>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Inactive Sites:</span>
+                    <span class="font-medium text-red-600">{{ inactive_sites }}</span>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Average Score:</span>
+                    <span class="font-medium {% if server_avg_score > 80 %}text-green-600{% elif server_avg_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                        {{ server_avg_score|floatformat:1|default:"N/A" }}
+                    </span>
                 </div>
             </div>
         </div>
 
+        <!-- Performance Summary Card -->
         <div class="bg-white rounded-lg shadow p-6">
-            <div class="flex items-center">
-                <div class="bg-red-500 rounded-full p-3 mr-4">
-                    <i class="fas fa-times-circle text-white text-xl"></i>
-                </div>
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Performance Summary</h3>
+            <div class="space-y-3">
+                {% if top_performers %}
                 <div>
-                    <p class="text-gray-500 text-sm">Inactive Domains</p>
-                    <p class="text-2xl font-bold text-red-600">{{ inactive_sites }}</p>
+                    <span class="text-sm text-gray-600">Top Performer:</span>
+                    <a href="{{ top_performers.0.url }}" class="block font-medium text-green-600 hover:text-green-800">
+                        {{ top_performers.0.name }}
+                        <span class="text-sm ml-1">({{ top_performers.0.avg_score|floatformat:1 }})</span>
+                    </a>
                 </div>
+                {% endif %}
+                {% if bottom_performers %}
+                <div>
+                    <span class="text-sm text-gray-600">Needs Attention:</span>
+                    <a href="{{ bottom_performers.0.url }}" class="block font-medium text-red-600 hover:text-red-800">
+                        {{ bottom_performers.0.name }}
+                        <span class="text-sm ml-1">({{ bottom_performers.0.avg_score|floatformat:1 }})</span>
+                    </a>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
 
-    <!-- Domains Table -->
+    <!-- Sites List -->
     <div class="bg-white rounded-lg shadow p-6">
-        <h3 class="text-lg font-semibold text-gray-800 mb-4">Domains on this Server</h3>
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">Sites on this Server</h3>
         
         {% if sites %}
         <div class="overflow-x-auto">
             <table class="min-w-full">
                 <thead>
                     <tr class="border-b">
-                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Name</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Site</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">IP Address</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Resolved IP</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Status</th>
-                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Created</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Latest Status</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Avg Score</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Latest Score</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for site in sites %}
                     <tr class="border-b hover:bg-gray-50">
-                        <td class="py-3 px-4 text-sm font-medium">{{ site.name }}</td>
-                        <td class="py-3 px-4 text-sm">{{ site.server_ip.ip_address|default:"-" }}</td>
-                        <td class="py-3 px-4 text-sm">{{ site.resolved_ip.ip_address|default:"-" }}</td>
                         <td class="py-3 px-4">
-                            {% if site.is_active %}
-                            <span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">Active</span>
+                            <a href="{% url 'site_detail' site.pk %}" class="text-blue-600 hover:text-blue-800 font-medium">
+                                {{ site.name }}
+                            </a>
+                        </td>
+                        <td class="py-3 px-4 font-mono text-sm">
+                            {% if site.server_ip %}
+                                <span class="bg-gray-100 px-2 py-1 rounded">{{ site.server_ip }}</span>
                             {% else %}
-                            <span class="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">Inactive</span>
+                                <span class="text-gray-400">-</span>
                             {% endif %}
                         </td>
-                        <td class="py-3 px-4 text-sm">{{ site.created_at|date:"Y-m-d H:i" }}</td>
+                        <td class="py-3 px-4 font-mono text-sm">
+                            {% if site.resolved_ip %}
+                                <span class="bg-gray-100 px-2 py-1 rounded">{{ site.resolved_ip }}</span>
+                            {% else %}
+                                <span class="text-gray-400">Not resolved</span>
+                            {% endif %}
+                        </td>
                         <td class="py-3 px-4">
-                            <a href="{% url 'site_detail' site.pk %}" class="text-blue-600 hover:text-blue-800 mr-2">
-                                <i class="fas fa-eye"></i>
-                            </a>
-                            <a href="#" class="text-green-600 hover:text-green-800 mr-2">
-                                <i class="fas fa-edit"></i>
-                            </a>
+                            {% if site.is_active %}
+                            <span class="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                                Active
+                            </span>
+                            {% else %}
+                            <span class="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
+                                Inactive
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4">
+                            {% with latest=site.snapshots.first %}
+                                {% if latest %}
+                                    {% if latest.http_status_code == 200 %}
+                                    <span class="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                                        {{ latest.http_status_code }}
+                                    </span>
+                                    {% elif latest.http_status_code >= 400 %}
+                                    <span class="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
+                                        {{ latest.http_status_code }}
+                                    </span>
+                                    {% else %}
+                                    <span class="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
+                                        {{ latest.http_status_code }}
+                                    </span>
+                                    {% endif %}
+                                {% else %}
+                                <span class="text-gray-400">-</span>
+                                {% endif %}
+                            {% endwith %}
+                        </td>
+                        <td class="py-3 px-4">
+                            {% if site.avg_score %}
+                            <span class="font-semibold {% if site.avg_score > 80 %}text-green-600{% elif site.avg_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                                {{ site.avg_score|floatformat:1 }}
+                            </span>
+                            {% else %}
+                            <span class="text-gray-400">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4">
+                            {% if site.latest_score_value %}
+                            <span class="font-semibold {% if site.latest_score_value > 80 %}text-green-600{% elif site.latest_score_value > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                                {{ site.latest_score_value|floatformat:1 }}
+                            </span>
+                            {% else %}
+                            <span class="text-gray-400">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4">
+                            <div class="flex space-x-2">
+                                <a href="{% url 'site_detail' site.pk %}" 
+                                   class="text-blue-600 hover:text-blue-800 text-sm">
+                                    <i class="fas fa-eye"></i> View
+                                </a>
+                                {% if site.latest_score_value %}
+                                <a href="{% url 'site_score_history' site.pk %}" 
+                                   class="text-purple-600 hover:text-purple-800 text-sm">
+                                    <i class="fas fa-chart-line"></i> Scores
+                                </a>
+                                {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -106,8 +209,51 @@
             </table>
         </div>
         {% else %}
-        <p class="text-center text-gray-500 py-8">No domains found on this server</p>
+        <p class="text-center text-gray-500 py-4">No sites on this server</p>
         {% endif %}
+    </div>
+
+    <!-- Top and Bottom Performers -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Top Performers -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Top Performers</h3>
+            {% if top_performers %}
+            <div class="space-y-2">
+                {% for performer in top_performers %}
+                <div class="flex justify-between items-center py-2 border-b last:border-0">
+                    <a href="{{ performer.url }}" class="text-blue-600 hover:text-blue-800">
+                        {{ performer.name }}
+                    </a>
+                    <span class="font-semibold text-green-600">{{ performer.avg_score|floatformat:1 }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-center py-4">No score data available</p>
+            {% endif %}
+        </div>
+
+        <!-- Bottom Performers (Need Attention) -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Need Attention</h3>
+            {% if bottom_performers %}
+            <div class="space-y-2">
+                {% for performer in bottom_performers %}
+                <div class="flex justify-between items-center py-2 border-b last:border-0">
+                    <a href="{{ performer.url }}" class="text-blue-600 hover:text-blue-800">
+                        {{ performer.name }}
+                    </a>
+                    <span class="font-semibold {% if forloop.first %}text-red-600{% else %}text-orange-600{% endif %}">
+                        {{ performer.avg_score|floatformat:1 }}
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-center py-4">No score data available</p>
+            {% endif %}
+        </div>
     </div>
 </div>
 {% endblock %}

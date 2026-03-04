@@ -73,13 +73,52 @@ class ServerDetailView(DetailView):
     model = Server
     template_name = 'monitoring/server_detail.html'
     context_object_name = 'server'
-
+    
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        # FIXED: removed server_ip and resolved_ip from select_related
-        context['sites'] = self.object.domains.all()
-        context['active_sites'] = self.object.domains.filter(is_active=True).count()
-        context['inactive_sites'] = self.object.domains.filter(is_active=False).count()
+        server = self.object
+        
+        # Get all sites on this server
+        sites = server.domains.all().order_by('name')
+        context['sites'] = sites
+        
+        # Calculate average scores for each site
+        for site in sites:
+            site.avg_score = SiteScore.objects.filter(
+                site=site
+            ).aggregate(Avg('overall_score'))['overall_score__avg']
+            
+            # Get latest score
+            latest_score = SiteScore.objects.filter(
+                site=site
+            ).order_by('-calculated_at').first()
+            site.latest_score_value = latest_score.overall_score if latest_score else None
+        
+        # Calculate server-wide statistics
+        context['total_sites'] = sites.count()
+        context['active_sites'] = sites.filter(is_active=True).count()
+        context['inactive_sites'] = sites.filter(is_active=False).count()
+        
+        # Calculate average score across all sites
+        all_scores = SiteScore.objects.filter(site__in=sites).aggregate(
+            avg_score=Avg('overall_score')
+        )['avg_score']
+        context['server_avg_score'] = round(all_scores, 1) if all_scores else None
+        
+        # Get sites with highest/lower scores
+        sites_with_scores = []
+        for site in sites:
+            if site.avg_score:
+                sites_with_scores.append({
+                    'name': site.name,
+                    'avg_score': site.avg_score,
+                    'url': site.get_absolute_url()
+                })
+        
+        # Sort for top/bottom performers
+        context['top_performers'] = sorted(sites_with_scores, key=lambda x: x['avg_score'], reverse=True)[:5]
+        context['bottom_performers'] = sorted(sites_with_scores, key=lambda x: x['avg_score'])[:5]
+        
         return context
 
 
