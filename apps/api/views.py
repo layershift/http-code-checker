@@ -9,6 +9,16 @@ from django.db import transaction
 from django.db.models import Count
 from apps.monitoring.models import Server, Site, SiteSnapshot, ScreenshotComparison
 import json
+import ipaddress
+
+def get_client_ip(request):
+    """Extract client IP from request"""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0].strip()
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
 
 @csrf_exempt
 @require_http_methods(["GET", "POST", "DELETE"])
@@ -16,9 +26,8 @@ def handle_servers(request):
     """
     API endpoint for server management
     GET: List all servers with stats
-    POST: Add a new server
+    POST: Add a new server (ip_address defaults to requester's IP if not provided)
     DELETE: Delete a server with optional cascade
-    Files are automatically handled by django-cleanup!
     """
     
     # ========== GET - List all servers ==========
@@ -31,10 +40,21 @@ def handle_servers(request):
         
         data = []
         for server in servers:
+            # Detect IP version if IP exists
+            ip_version = None
+            if server.ip_address:
+                try:
+                    ip = ipaddress.ip_address(server.ip_address)
+                    ip_version = ip.version  # 4 or 6
+                except:
+                    ip_version = 'unknown'
+            
             data.append({
                 'id': server.id,
                 'name': server.name,
                 'description': server.description,
+                'ip_address': server.ip_address,
+                'ip_version': ip_version,
                 'created_at': server.created_at.isoformat(),
                 'stats': {
                     'sites': server.sites_count,
@@ -64,11 +84,39 @@ def handle_servers(request):
                     'message': 'Server name is required'
                 }, status=400)
             
+            # Get IP address - either from payload or from requester
+            ip_address = data.get('ip_address')
+            
+            if not ip_address:
+                # No IP provided, use requester's IP
+                ip_address = get_client_ip(request)
+                print(f"📡 No IP provided, using requester's IP: {ip_address}")
+                
+                # Handle localhost/IPv6 cases
+                if ip_address == '::1':
+                    ip_address = '127.0.0.1'
+                elif ip_address == '::ffff:127.0.0.1':
+                    ip_address = '127.0.0.1'
+            
+            # Validate IP address
+            try:
+                ip = ipaddress.ip_address(ip_address)
+                print(f"✅ Valid IP address: {ip} (IPv{ip.version})")
+            except ValueError as e:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'Invalid IP address: {ip_address}'
+                }, status=400)
+            
             # Create server
             server = Server.objects.create(
                 name=data['name'],
-                description=data.get('description', '')
+                description=data.get('description', ''),
+                ip_address=ip_address
             )
+            
+            # Determine IP version for response
+            ip_version = ip.version
             
             return JsonResponse({
                 'status': 'success',
@@ -77,6 +125,9 @@ def handle_servers(request):
                     'id': server.id,
                     'name': server.name,
                     'description': server.description,
+                    'ip_address': server.ip_address,
+                    'ip_version': ip_version,
+                    'ip_source': 'payload' if data.get('ip_address') else 'requester',
                     'created_at': server.created_at.isoformat(),
                     'stats': {
                         'sites': 0,
@@ -145,30 +196,20 @@ def handle_servers(request):
                             'comparisons': comparisons_count,
                             'sites_list': [
                                 {'id': s.id, 'name': s.name} 
-                                for s in sites[:10]  # First 10 sites
+                                for s in sites[:10]
                             ]
                         },
                         'solution': 'Set "cascade": true to delete all related data'
                     }, status=400)
                 
-                # CASCADE DELETE - django-cleanup will handle all file deletions automatically!
+                # CASCADE DELETE
                 with transaction.atomic():
-                    # Get all site IDs for response
                     site_ids = list(sites.values_list('id', flat=True))
                     
-                    # Delete in correct order (comparisons first due to FK constraints)
-                    # django-cleanup signals will fire and delete all associated files
-                    
-                    # Step 1: Delete all comparisons (heatmaps, diff images auto-deleted)
                     comparisons_deleted = ScreenshotComparison.objects.filter(site__in=sites).delete()[0]
-                    
-                    # Step 2: Delete all snapshots (screenshots auto-deleted)
                     snapshots_deleted = SiteSnapshot.objects.filter(site__in=sites).delete()[0]
-                    
-                    # Step 3: Delete all sites
                     sites_deleted = sites.delete()[0]
                     
-                    # Step 4: Delete the server
                     server_name = server.name
                     server.delete()
                 
@@ -180,7 +221,7 @@ def handle_servers(request):
                         'sites': sites_deleted,
                         'snapshots': snapshots_deleted,
                         'comparisons': comparisons_deleted,
-                        'site_ids': site_ids[:10]  # First 10 site IDs
+                        'site_ids': site_ids[:10]
                     }
                 })
             else:

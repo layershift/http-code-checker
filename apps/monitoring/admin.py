@@ -52,7 +52,7 @@ class SiteSnapshotAdmin(admin.ModelAdmin):
         snapshot.save()
         self.message_user(request, f"Snapshot {snapshot.id} set as baseline for {snapshot.site.name}")
     set_as_baseline.short_description = "Set as baseline for this site"
-    
+
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
         if 'screenshot' in form.base_fields:
@@ -294,11 +294,26 @@ class SiteAdmin(admin.ModelAdmin):
 
 @admin.register(Server)
 class ServerAdmin(admin.ModelAdmin):
-    list_display = ['name', 'created_at', 'site_count']
-    search_fields = ['name']
-
+    list_display = ['name', 'ip_address', 'created_at', 'site_count']
+    list_filter = ['created_at']
+    search_fields = ['name', 'ip_address']
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'description', 'ip_address')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    readonly_fields = ['created_at']
+    
     def site_count(self, obj):
-        return obj.domains.count()
+        count = obj.domains.count()
+        url = reverse('admin:monitoring_site_changelist') + f'?server__id={obj.id}'
+        return format_html('<a href="{}">{} site{}</a>', url, count, 's' if count != 1 else '')
     site_count.short_description = "Sites"
 
 
