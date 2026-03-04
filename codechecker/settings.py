@@ -50,7 +50,8 @@ INSTALLED_APPS = [
     "apps.api",
     "apps.core",
     "apps.monitoring.apps.MonitoringConfig",
-    "apps.infrastructure"
+    "apps.infrastructure",
+    "django_cleanup",
 ]
 
 RQ_QUEUES = {

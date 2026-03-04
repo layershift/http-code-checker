@@ -162,6 +162,15 @@ wheels = [
 ]
 
 [[package]]
+name = "django-cleanup"
+version = "9.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/01/b15a8de8b9ec75ea157ec58f86411894ca1182305fabaee31193076e7f62/django_cleanup-9.0.0.tar.gz", hash = "sha256:bb9fb560aaf62959c81e31fa40885c36bbd5854d5aa21b90df2c7e4ba633531e", size = 17917, upload-time = "2024-09-18T21:58:06.089Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/d7/a83dc87c2383e125da29948f7bccf5b30126c087a5a831316482407a960f/django_cleanup-9.0.0-py3-none-any.whl", hash = "sha256:19f8b0e830233f9f0f683b17181f414672a0f48afe3ea3cc80ba47ae40ad880c", size = 10726, upload-time = "2024-09-18T21:58:04.626Z" },
+]
+
+[[package]]
 name = "django-colorfield"
 version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -291,6 +300,7 @@ dependencies = [
     { name = "cv2-tools" },
     { name = "django" },
     { name = "django-admin-interface" },
+    { name = "django-cleanup" },
     { name = "django-rq" },
     { name = "djangorestframework" },
     { name = "matplotlib" },
@@ -310,6 +320,7 @@ requires-dist = [
     { name = "cv2-tools", specifier = ">=2.4.0" },
     { name = "django", specifier = ">=4.2.28" },
     { name = "django-admin-interface", specifier = ">=0.32.0" },
+    { name = "django-cleanup", specifier = ">=9.0.0" },
     { name = "django-rq", specifier = ">=3.2.2" },
     { name = "djangorestframework", specifier = ">=3.16.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
