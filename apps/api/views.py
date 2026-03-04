@@ -717,3 +717,245 @@ def handle_sites(request):
                 'status': 'error',
                 'message': str(e)
             }, status=500)
+        
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def trigger_snapshot(request):
+    """
+    API endpoint to trigger a new snapshot for a site
+    POST: {"name": "example.com"} 
+    Creates a new snapshot, enqueues screenshot capture, and automatically queues comparison
+    """
+    try:
+        # Parse JSON data
+        if request.content_type == 'application/json':
+            data = json.loads(request.body)
+        else:
+            data = request.POST.dict()
+        
+        # Get site name
+        site_name = data.get('name') or data.get('site_name') or data.get('domain')
+        
+        if not site_name:
+            return JsonResponse({
+                'status': 'error',
+                'message': 'Site name is required (use "name": "example.com")'
+            }, status=400)
+        
+        # Find the site
+        try:
+            site = Site.objects.get(name=site_name.lower().strip())
+        except Site.DoesNotExist:
+            return JsonResponse({
+                'status': 'error',
+                'message': f'Site "{site_name}" not found'
+            }, status=404)
+        
+        # Check if site is active
+        if not site.is_active:
+            return JsonResponse({
+                'status': 'error',
+                'message': f'Site "{site_name}" is inactive'
+            }, status=400)
+        
+        # Get baseline snapshot for reference
+        baseline = site.snapshots.filter(is_baseline=True).first()
+        
+        # Create new snapshot
+        with transaction.atomic():
+            snapshot = SiteSnapshot.objects.create(
+                site=site,
+                http_status_code=0,  # Temporary value, will be updated by task
+                content_length=0      # Temporary value, will be updated by task
+                # is_baseline is NOT set - only the first snapshot is baseline
+            )
+            
+            print(f"✅ Created new snapshot ID: {snapshot.id} for {site.name}")
+            
+            # Get the queue
+            queue = get_queue('default')
+            
+            # Enqueue screenshot capture task
+            screenshot_job = queue.enqueue(
+                capture_screenshot_task,
+                snapshot.id,
+                site.name,
+                site.id
+            )
+            
+            print(f"🚀 Enqueued screenshot job: {screenshot_job.id}")
+            
+            # Note: The comparison will be automatically triggered by the 
+            # create_comparison_task inside capture_screenshot_task after screenshot is saved
+        
+        response_data = {
+            'status': 'success',
+            'message': f'Snapshot triggered for "{site.name}"',
+            'snapshot': {
+                'id': snapshot.id,
+                'created_at': snapshot.taken_at.isoformat(),
+                'status': 'queued'
+            },
+            'jobs': {
+                'screenshot': {
+                    'id': screenshot_job.id,
+                    'status': 'queued'
+                }
+            }
+        }
+        
+        # Add baseline info if available
+        if baseline:
+            response_data['baseline'] = {
+                'id': baseline.id,
+                'taken_at': baseline.taken_at.isoformat()
+            }
+        
+        return JsonResponse(response_data, status=202)  # 202 Accepted
+        
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'status': 'error',
+            'message': 'Invalid JSON data'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def get_snapshot_status(request, snapshot_id):
+    """
+    API endpoint to check the status of a snapshot
+    GET /api/v1/snapshots/123/status/
+    """
+    try:
+        snapshot = SiteSnapshot.objects.select_related('site').get(id=snapshot_id)
+        
+        # Check if there are any comparisons involving this snapshot
+        from apps.monitoring.models import ScreenshotComparison
+        
+        as_previous = ScreenshotComparison.objects.filter(previous_snapshot=snapshot).first()
+        as_current = ScreenshotComparison.objects.filter(current_snapshot=snapshot).first()
+        
+        comparison = as_previous or as_current
+        
+        response = {
+            'status': 'success',
+            'snapshot': {
+                'id': snapshot.id,
+                'site': snapshot.site.name,
+                'taken_at': snapshot.taken_at.isoformat(),
+                'http_status_code': snapshot.http_status_code,
+                'content_length': snapshot.content_length,
+                'has_screenshot': bool(snapshot.screenshot),
+                'is_baseline': snapshot.is_baseline
+            }
+        }
+        
+        if snapshot.screenshot:
+            response['snapshot']['screenshot_url'] = snapshot.screenshot.url
+        
+        if comparison:
+            response['comparison'] = {
+                'id': comparison.id,
+                'ssim_score': comparison.ssim_score,
+                'percent_difference': comparison.percent_difference,
+                'created_at': comparison.created_at.isoformat()
+            }
+            if comparison.heatmap:
+                response['comparison']['heatmap_url'] = comparison.heatmap.url
+            if comparison.diff_image:
+                response['comparison']['diff_url'] = comparison.diff_image.url
+        
+        return JsonResponse(response)
+        
+    except SiteSnapshot.DoesNotExist:
+        return JsonResponse({
+            'status': 'error',
+            'message': f'Snapshot {snapshot_id} not found'
+        }, status=404)
+    except Exception as e:
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def list_snapshots(request, site_name=None):
+    """
+    API endpoint to list all snapshots for a site
+    GET /api/v1/snapshots/example.com/
+    Ordered by taken_at DESC (newest first)
+    """
+    if not site_name:
+        return JsonResponse({
+            'status': 'error',
+            'message': 'Site name is required in URL'
+        }, status=400)
+    
+    try:
+        site = Site.objects.get(name=site_name.lower().strip())
+    except Site.DoesNotExist:
+        return JsonResponse({
+            'status': 'error',
+            'message': f'Site "{site_name}" not found'
+        }, status=404)
+    
+    # Get all snapshots for the site - newest first
+    snapshots = site.snapshots.all().order_by('-taken_at')
+    
+    # Pagination
+    limit = request.GET.get('limit', 20)
+    offset = request.GET.get('offset', 0)
+    
+    try:
+        limit = int(limit)
+        offset = int(offset)
+    except:
+        limit = 20
+        offset = 0
+    
+    paginated = snapshots[offset:offset + limit]
+    
+    snapshots_data = []
+    for snap in paginated:
+        data = {
+            'id': snap.id,
+            'taken_at': snap.taken_at.isoformat(),
+            'taken_at_timestamp': snap.taken_at.timestamp(),
+            'http_status_code': snap.http_status_code,
+            'content_length': snap.content_length,
+            'has_screenshot': bool(snap.screenshot),
+            'is_baseline': snap.is_baseline
+        }
+        if snap.screenshot:
+            data['screenshot_url'] = snap.screenshot.url
+        snapshots_data.append(data)
+    
+    # Get baseline info
+    baseline = site.snapshots.filter(is_baseline=True).first()
+    
+    return JsonResponse({
+        'status': 'success',
+        'site': {
+            'id': site.id,
+            'name': site.name,
+            'baseline_snapshot_id': baseline.id if baseline else None,
+            'baseline_taken_at': baseline.taken_at.isoformat() if baseline else None
+        },
+        'snapshots': snapshots_data,
+        'pagination': {
+            'total': snapshots.count(),
+            'limit': limit,
+            'offset': offset,
+            'returned': len(snapshots_data),
+            'has_next': (offset + limit) < snapshots.count()
+        }
+    })

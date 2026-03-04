@@ -11,9 +11,10 @@ from playwright.sync_api import sync_playwright
 print("🔄 Loading tasks module...")
 
 @job('default')
+@job('default')
 def capture_screenshot_task(snapshot_id, site_name, site_id):
     """
-    Task 1: Capture screenshot for a snapshot
+    Task 1: Capture screenshot for a snapshot - then trigger comparison
     """
     current_job = get_current_job()
     print(f"🎯 [Job {current_job.id}] Starting screenshot capture for snapshot {snapshot_id}, site: {site_name}")
@@ -23,7 +24,8 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
     screenshot_saved = False
     
     try:
-        from .models import SiteSnapshot
+        from .models import SiteSnapshot, ScreenshotComparison
+        from .comparison import compare_screenshots
         
         # Get snapshot
         snapshot = SiteSnapshot.objects.get(id=snapshot_id)
@@ -113,6 +115,14 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
             snapshot.screenshot.save(filename, ContentFile(screenshot_data), save=True)
             screenshot_saved = True
             print(f"✅ Screenshot saved for snapshot {snapshot_id}")
+            
+            # ===== TRIGGER COMPARISON HERE =====
+            print("🔍 Triggering comparison job...")
+            from .tasks import create_comparison_task
+            comparison_job = create_comparison_task.delay(snapshot_id, site_id)
+            print(f"🚀 Enqueued comparison job: {comparison_job.id}")
+            # ====================================
+            
         else:
             snapshot.save()
             print(f"⚠️ Snapshot {snapshot_id} saved without screenshot (status: {status_code})")
@@ -122,7 +132,8 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
             'snapshot_id': snapshot_id,
             'site_id': site_id,
             'screenshot_saved': screenshot_saved,
-            'status_code': status_code
+            'status_code': status_code,
+            'comparison_triggered': screenshot_saved  # Indicate if comparison was triggered
         }
         
     except Exception as e:
