@@ -1,148 +1,298 @@
 {% extends 'base.html' %}
+{% load static %}
 
-{% block title %}Sites - Monitoring{% endblock %}
+{% block title %}Sites{% endblock %}
 
 {% block content %}
 <div class="space-y-6">
-    <!-- Header -->
+    <!-- Header with Stats -->
     <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex justify-between items-center">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
                 <h2 class="text-2xl font-bold text-gray-800">Sites</h2>
-                <p class="text-gray-600">Total: {{ total_sites }} sites ({{ active_sites }} active, {{ inactive_sites }} inactive)</p>
+                <p class="text-gray-600">Monitor all websites across your servers</p>
             </div>
-            <a href="#" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
-                <i class="fas fa-plus mr-2"></i>Add Site
-            </a>
+            <div class="flex space-x-4 text-sm">
+                <div class="text-center">
+                    <span class="block text-2xl font-bold text-gray-800">{{ total_sites }}</span>
+                    <span class="text-gray-500">Total</span>
+                </div>
+                <div class="text-center">
+                    <span class="block text-2xl font-bold text-green-600">{{ active_sites }}</span>
+                    <span class="text-gray-500">Active</span>
+                </div>
+                <div class="text-center">
+                    <span class="block text-2xl font-bold text-red-600">{{ inactive_sites }}</span>
+                    <span class="text-gray-500">Inactive</span>
+                </div>
+            </div>
         </div>
-    </div>
 
-    <!-- Filters -->
-    <div class="bg-white rounded-lg shadow p-4">
-        <form method="get" class="flex flex-wrap gap-4">
-            <div class="flex-1 min-w-[200px]">
-                <input type="text" name="search" placeholder="Search sites..." value="{{ current_search }}"
-                       class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <!-- Filters -->
+        <div class="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Search -->
+            <div>
+                <form method="get" class="flex">
+                    <input type="text" 
+                           name="search" 
+                           value="{{ current_search }}"
+                           placeholder="Search sites..." 
+                           class="w-full border rounded-l-lg px-4 py-2 focus:ring-blue-500 focus:border-blue-500">
+                    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-r-lg hover:bg-blue-700">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </form>
             </div>
-            <div class="w-48">
-                <select name="server" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">All Servers</option>
-                    {% for server in servers %}
-                    <option value="{{ server.pk }}" {% if current_server == server.pk|stringformat:"s" %}selected{% endif %}>
-                        {{ server.name }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="w-40">
-                <select name="status" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+
+            <!-- Status Filter -->
+            <div>
+                <select name="status" 
+                        onchange="window.location.href = '?status=' + this.value + '&server={{ current_server }}&search={{ current_search }}'"
+                        class="w-full border rounded-lg px-4 py-2 focus:ring-blue-500 focus:border-blue-500">
                     <option value="">All Status</option>
                     <option value="active" {% if current_status == 'active' %}selected{% endif %}>Active</option>
                     <option value="inactive" {% if current_status == 'inactive' %}selected{% endif %}>Inactive</option>
                 </select>
             </div>
-            <button type="submit" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                <i class="fas fa-filter mr-2"></i>Filter
-            </button>
-            <a href="{% url 'site_list' %}" class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
-                Clear
-            </a>
-        </form>
+
+            <!-- Server Filter -->
+            <div>
+                <select name="server" 
+                        onchange="window.location.href = '?server=' + this.value + '&status={{ current_status }}&search={{ current_search }}'"
+                        class="w-full border rounded-lg px-4 py-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">All Servers</option>
+                    {% for server in servers %}
+                    <option value="{{ server.id }}" {% if current_server|stringformat:"s" == server.id|stringformat:"s" %}selected{% endif %}>
+                        {{ server.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Clear Filters -->
+            <div>
+                <a href="{% url 'site_list' %}" class="block w-full text-center bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">
+                    <i class="fas fa-times mr-2"></i>Clear Filters
+                </a>
+            </div>
+        </div>
     </div>
 
     <!-- Sites Table -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="min-w-full">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Server</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resolved IP</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-                {% for site in sites %}
-                <tr class="hover:bg-gray-50">
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {{ site.name }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <a href="{% url 'server_detail' site.server.pk %}" class="text-blue-600 hover:text-blue-800">
-                            {{ site.server.name }}
-                        </a>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {{ site.server_ip.ip_address|default:"-" }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {{ site.resolved_ip.ip_address|default:"-" }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap">
-                        {% if site.is_active %}
-                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                            Active
-                        </span>
-                        {% else %}
-                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                            Inactive
-                        </span>
-                        {% endif %}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {{ site.created_at|date:"Y-m-d H:i" }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <a href="{% url 'site_detail' site.pk %}" class="text-blue-600 hover:text-blue-800 mr-3">
-                            <i class="fas fa-eye"></i>
-                        </a>
-                        <a href="#" class="text-green-600 hover:text-green-800 mr-3">
-                            <i class="fas fa-edit"></i>
-                        </a>
-                        <a href="#" class="text-red-600 hover:text-red-800">
-                            <i class="fas fa-trash"></i>
-                        </a>
-                    </td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="7" class="px-6 py-12 text-center text-gray-500">
-                        <i class="fas fa-globe text-4xl mb-4"></i>
-                        <p>No sites found</p>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Site</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Server</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resolved IP</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for site in sites %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="flex items-center">
+                                <div>
+                                    <a href="{% url 'site_detail' site.id %}" class="text-sm font-medium text-blue-600 hover:text-blue-900">
+                                        {{ site.name }}
+                                    </a>
+                                    <p class="text-xs text-gray-500">ID: {{ site.id }}</p>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            {% if site.server %}
+                            <a href="{% url 'server_detail' site.server.id %}" class="text-sm text-gray-900 hover:text-blue-600">
+                                {{ site.server.name }}
+                            </a>
+                            {% else %}
+                            <span class="text-sm text-gray-400">No server</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm font-mono">
+                                {% if site.resolved_ip %}
+                                <span class="bg-gray-100 px-2 py-1 rounded">{{ site.resolved_ip }}</span>
+                                {% else %}
+                                <span class="text-gray-400">Not resolved</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            {% with latest=site.snapshots.first %}
+                                {% if latest %}
+                                    {% if latest.http_status_code == 200 %}
+                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                        {{ latest.http_status_code }}
+                                    </span>
+                                    {% elif latest.http_status_code >= 400 %}
+                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                                        {{ latest.http_status_code }}
+                                    </span>
+                                    {% elif latest.http_status_code == 0 %}
+                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                        Pending
+                                    </span>
+                                    {% else %}
+                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+                                        {{ latest.http_status_code }}
+                                    </span>
+                                    {% endif %}
+                                {% else %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+                                    No data
+                                </span>
+                                {% endif %}
+                            {% endwith %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            {% if site.is_active %}
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                Active
+                            </span>
+                            {% else %}
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                                Inactive
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {{ site.created_at|date:"Y-m-d" }}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <!-- View Only Actions -->
+                            <div class="flex space-x-2">
+                                <a href="{% url 'site_detail' site.id %}" 
+                                   class="text-blue-600 hover:text-blue-900 bg-blue-50 px-3 py-1 rounded">
+                                    <i class="fas fa-eye mr-1"></i>View
+                                </a>
+                                {% with latest=site.snapshots.first %}
+                                    {% if latest and latest.screenshot %}
+                                    <button onclick="openImageModal('{{ latest.screenshot.url }}', 'Latest screenshot for {{ site.name }}')" 
+                                            class="text-purple-600 hover:text-purple-900 bg-purple-50 px-3 py-1 rounded">
+                                        <i class="fas fa-image mr-1"></i>Latest
+                                    </button>
+                                    {% endif %}
+                                {% endwith %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="px-6 py-12 text-center text-gray-500">
+                            <i class="fas fa-globe text-4xl mb-3 text-gray-300"></i>
+                            <p class="text-lg">No sites found</p>
+                            <p class="text-sm">Try adjusting your filters or clear them to see all sites</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
 
-    <!-- Pagination -->
-    {% if is_paginated %}
-    <div class="bg-white rounded-lg shadow p-4">
-        <div class="flex justify-center space-x-2">
-            {% if page_obj.has_previous %}
-            <a href="?page={{ page_obj.previous_page_number }}{% if current_search %}&search={{ current_search }}{% endif %}{% if current_server %}&server={{ current_server }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" 
-               class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Previous</a>
-            {% endif %}
-            
-            {% for num in page_obj.paginator.page_range %}
-                {% if page_obj.number == num %}
-                <span class="px-3 py-1 bg-blue-600 text-white rounded">{{ num }}</span>
-                {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
-                <a href="?page={{ num }}{% if current_search %}&search={{ current_search }}{% endif %}{% if current_server %}&server={{ current_server }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" 
-                   class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">{{ num }}</a>
+        <!-- Pagination -->
+        {% if is_paginated %}
+        <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+            <div class="flex-1 flex justify-between sm:hidden">
+                {% if page_obj.has_previous %}
+                <a href="?page={{ page_obj.previous_page_number }}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_server %}&server={{ current_server }}{% endif %}{% if current_search %}&search={{ current_search }}{% endif %}" 
+                   class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Previous
+                </a>
                 {% endif %}
-            {% endfor %}
-            
-            {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}{% if current_search %}&search={{ current_search }}{% endif %}{% if current_server %}&server={{ current_server }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" 
-               class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Next</a>
-            {% endif %}
+                {% if page_obj.has_next %}
+                <a href="?page={{ page_obj.next_page_number }}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_server %}&server={{ current_server }}{% endif %}{% if current_search %}&search={{ current_search }}{% endif %}" 
+                   class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Next
+                </a>
+                {% endif %}
+            </div>
+            <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-sm text-gray-700">
+                        Showing
+                        <span class="font-medium">{{ page_obj.start_index }}</span>
+                        to
+                        <span class="font-medium">{{ page_obj.end_index }}</span>
+                        of
+                        <span class="font-medium">{{ paginator.count }}</span>
+                        results
+                    </p>
+                </div>
+                <div>
+                    <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                        {% if page_obj.has_previous %}
+                        <a href="?page={{ page_obj.previous_page_number }}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_server %}&server={{ current_server }}{% endif %}{% if current_search %}&search={{ current_search }}{% endif %}" 
+                           class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                            <span class="sr-only">Previous</span>
+                            <i class="fas fa-chevron-left"></i>
+                        </a>
+                        {% endif %}
+                        
+                        {% for i in paginator.page_range %}
+                            {% if page_obj.number == i %}
+                            <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-blue-50 text-sm font-medium text-blue-600">
+                                {{ i }}
+                            </span>
+                            {% elif i > page_obj.number|add:'-3' and i < page_obj.number|add:'3' %}
+                            <a href="?page={{ i }}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_server %}&server={{ current_server }}{% endif %}{% if current_search %}&search={{ current_search }}{% endif %}" 
+                               class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">
+                                {{ i }}
+                            </a>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if page_obj.has_next %}
+                        <a href="?page={{ page_obj.next_page_number }}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_server %}&server={{ current_server }}{% endif %}{% if current_search %}&search={{ current_search }}{% endif %}" 
+                           class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                            <span class="sr-only">Next</span>
+                            <i class="fas fa-chevron-right"></i>
+                        </a>
+                        {% endif %}
+                    </nav>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Image Modal -->
+<div id="imageModal" class="fixed inset-0 bg-black bg-opacity-75 hidden z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeImageModal()">
+    <div class="relative max-w-6xl max-h-screen">
+        <button onclick="closeImageModal()" class="absolute -top-10 right-0 text-white hover:text-gray-300 text-2xl">
+            <i class="fas fa-times"></i>
+        </button>
+        <img id="modalImage" src="" alt="Screenshot" class="max-w-full max-h-[90vh] rounded-lg shadow-2xl">
+        <div id="modalCaption" class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm rounded-b-lg">
         </div>
     </div>
-    {% endif %}
 </div>
+
+<script>
+function openImageModal(imageUrl, caption) {
+    document.getElementById('modalImage').src = imageUrl;
+    document.getElementById('modalCaption').innerHTML = caption || '';
+    document.getElementById('imageModal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeImageModal() {
+    document.getElementById('imageModal').classList.add('hidden');
+    document.body.style.overflow = 'auto';
+}
+
+// Close with Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeImageModal();
+    }
+});
+</script>
 {% endblock %}
