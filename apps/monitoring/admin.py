@@ -4,7 +4,9 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.contrib import messages
 from django.utils.safestring import mark_safe
-from .models import Site, Server, SiteSnapshot, ScreenshotComparison
+from .models import Site, Server, SiteSnapshot, ScreenshotComparison, SiteScore
+from django.db.models import Avg, Max, Min
+
 from .utils import capture_screenshot_for_snapshot
 from .tasks import capture_screenshot_task, create_comparison_task
 
@@ -353,3 +355,22 @@ class ScreenshotComparisonAdmin(admin.ModelAdmin):
             return format_html('<img src="{}" width="300" style="border-radius: 4px;" />', obj.diff_image.url)
         return "No diff image"
     diff_preview.short_description = "Difference Preview"
+
+
+@admin.register(SiteScore)
+class SiteScoreAdmin(admin.ModelAdmin):
+    list_display = ['site', 'overall_score', 'performance_score', 'seo_score', 
+                   'security_score', 'availability_score', 'calculated_at']
+    list_filter = ['site', 'calculated_at']
+    readonly_fields = ['calculated_at']
+    
+    def changelist_view(self, request, extra_context=None):
+        # Add aggregate stats
+        extra_context = extra_context or {}
+        extra_context['avg_scores'] = SiteScore.objects.aggregate(
+            avg_overall=Avg('overall_score'),
+            avg_performance=Avg('performance_score'),
+            avg_seo=Avg('seo_score'),
+            avg_security=Avg('security_score')
+        )
+        return super().changelist_view(request, extra_context=extra_context)

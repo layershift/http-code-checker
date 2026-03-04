@@ -228,3 +228,49 @@ class ScreenshotComparison(models.Model):
 
     def __str__(self):
         return f"{self.site.name} - {self.previous_snapshot.taken_at} vs {self.current_snapshot.taken_at} (SSIM: {self.ssim_score:.3f})"
+
+class SiteScore(models.Model):
+    """
+    Stores various quality scores for a site over time
+    """
+    site = models.ForeignKey(
+        Site, 
+        on_delete=models.CASCADE,
+        related_name="scores"
+    )
+    snapshot = models.OneToOneField(
+        SiteSnapshot,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="score"
+    )
+    
+    # Score components (normalized 0-100)
+    performance_score = models.FloatField(null=True, blank=True)
+    seo_score = models.FloatField(null=True, blank=True)
+    security_score = models.FloatField(null=True, blank=True)
+    availability_score = models.FloatField(null=True, blank=True)
+    content_quality_score = models.FloatField(null=True, blank=True)
+    
+    # Overall composite score (weighted average)
+    overall_score = models.FloatField(null=True, blank=True)
+    
+    # Raw metrics that feed into scores
+    page_load_time_ms = models.IntegerField(null=True, blank=True)
+    ttfb_ms = models.IntegerField(null=True, blank=True)
+    content_size_kb = models.IntegerField(null=True, blank=True)
+    has_ssl = models.BooleanField(default=False)
+    has_security_headers = models.BooleanField(default=False)
+    
+    # Metadata
+    calculated_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-calculated_at']
+        indexes = [
+            models.Index(fields=['site', '-calculated_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.site.name} - {self.overall_score} - {self.calculated_at}"

@@ -1,0 +1,251 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ site.name }} - Score History{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-center">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800">{{ site.name }}</h2>
+                <p class="text-gray-600">Site Quality Score History</p>
+            </div>
+            <a href="{% url 'site_detail' site.id %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">
+                <i class="fas fa-arrow-left mr-2"></i>Back to Site
+            </a>
+        </div>
+    </div>
+
+    <!-- Score Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="text-gray-600 text-sm">Current Score</div>
+            <div class="text-3xl font-bold {% if latest_score.overall_score > 80 %}text-green-600{% elif latest_score.overall_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                {{ latest_score.overall_score|floatformat:1|default:"N/A" }}
+            </div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="text-gray-600 text-sm">Average Score</div>
+            <div class="text-3xl font-bold">{{ avg_score|floatformat:1|default:"N/A" }}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="text-gray-600 text-sm">Trend</div>
+            <div class="text-3xl font-bold {% if trend > 0 %}text-green-600{% elif trend < 0 %}text-red-600{% endif %}">
+                {{ trend|floatformat:1 }}
+                <span class="text-sm">({{ trend_percentage|floatformat:1 }}%)</span>
+            </div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="text-gray-600 text-sm">Total Checks</div>
+            <div class="text-3xl font-bold">{{ scores|length }}</div>
+        </div>
+    </div>
+
+    <!-- Chart Container - FIXED HEIGHT -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Score Evolution</h3>
+            <div class="flex space-x-2">
+                <button onclick="window.print()" class="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm">
+                    <i class="fas fa-print mr-1"></i>Print
+                </button>
+            </div>
+        </div>
+        <!-- Fixed height container - prevents chart expansion -->
+        <div style="height: 400px; width: 100%; position: relative;">
+            <canvas id="scoreChart" style="max-height: 400px; width: 100%;"></canvas>
+        </div>
+    </div>
+
+    <!-- Score History Table with Scroll -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">Score History</h3>
+        
+        <!-- Scrollable table container -->
+        <div class="overflow-x-auto" style="max-height: 500px; overflow-y: auto;">
+            <table class="min-w-full">
+                <thead class="bg-gray-50 sticky top-0">
+                    <tr>
+                        <th class="py-3 px-4 text-left text-sm font-medium text-gray-500">Date</th>
+                        <th class="py-3 px-4 text-left text-sm font-medium text-gray-500">Overall</th>
+                        <th class="py-3 px-4 text-left text-sm font-medium text-gray-500">Performance</th>
+                        <th class="py-3 px-4 text-left text-sm font-medium text-gray-500">SEO</th>
+                        <th class="py-3 px-4 text-left text-sm font-medium text-gray-500">Security</th>
+                        <th class="py-3 px-4 text-left text-sm font-medium text-gray-500">Availability</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for score in scores %}
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="py-3 px-4">{{ score.calculated_at|date:"Y-m-d H:i" }}</td>
+                        <td class="py-3 px-4 font-semibold {% if score.overall_score > 80 %}text-green-600{% elif score.overall_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                            {{ score.overall_score|floatformat:1 }}
+                        </td>
+                        <td class="py-3 px-4">{{ score.performance_score|floatformat:1|default:"-" }}</td>
+                        <td class="py-3 px-4">{{ score.seo_score|floatformat:1|default:"-" }}</td>
+                        <td class="py-3 px-4">{{ score.security_score|floatformat:1|default:"-" }}</td>
+                        <td class="py-3 px-4">{{ score.availability_score|floatformat:1|default:"-" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="py-8 text-center text-gray-500">
+                            No score data available yet
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Table Footer -->
+        <div class="mt-4 text-sm text-gray-500 text-right">
+            Showing {{ scores|length }} entries
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const chartData = {{ chart_data|safe }};
+        
+        if (chartData.dates && chartData.dates.length > 0) {
+            const ctx = document.getElementById('scoreChart').getContext('2d');
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.dates,
+                    datasets: [
+                        {
+                            label: 'Overall Score',
+                            data: chartData.overall,
+                            borderColor: 'rgb(59, 130, 246)',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.1,
+                            fill: true,
+                            pointRadius: 3,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Performance',
+                            data: chartData.performance,
+                            borderColor: 'rgb(16, 185, 129)',
+                            backgroundColor: 'transparent',
+                            tension: 0.1,
+                            borderDash: [5, 5],
+                            borderWidth: 2,
+                            pointRadius: 2
+                        },
+                        {
+                            label: 'SEO',
+                            data: chartData.seo,
+                            borderColor: 'rgb(245, 158, 11)',
+                            backgroundColor: 'transparent',
+                            tension: 0.1,
+                            borderDash: [5, 5],
+                            borderWidth: 2,
+                            pointRadius: 2
+                        },
+                        {
+                            label: 'Security',
+                            data: chartData.security,
+                            borderColor: 'rgb(139, 92, 246)',
+                            backgroundColor: 'transparent',
+                            tension: 0.1,
+                            borderDash: [5, 5],
+                            borderWidth: 2,
+                            pointRadius: 2
+                        },
+                        {
+                            label: 'Availability',
+                            data: chartData.availability,
+                            borderColor: 'rgb(236, 72, 153)',
+                            backgroundColor: 'transparent',
+                            tension: 0.1,
+                            borderDash: [5, 5],
+                            borderWidth: 2,
+                            pointRadius: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,  // Important: prevents chart from dictating its own size
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 15,
+                                font: { size: 11 }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'Score'
+                            },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                font: { size: 10 }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
+</script>
+
+<style>
+    /* Ensure chart container doesn't expand */
+    #scoreChart {
+        max-height: 400px !important;
+        width: 100% !important;
+    }
+    
+    /* Sticky table header */
+    .sticky {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Scrollbar styling */
+    .overflow-x-auto::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    .overflow-x-auto::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+    }
+    
+    .overflow-x-auto::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 4px;
+    }
+    
+    .overflow-x-auto::-webkit-scrollbar-thumb:hover {
+        background: #555;
+    }
+</style>
+{% endblock %}

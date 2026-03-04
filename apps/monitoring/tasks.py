@@ -122,6 +122,8 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
             comparison_job = create_comparison_task.delay(snapshot_id, site_id)
             print(f"🚀 Enqueued comparison job: {comparison_job.id}")
             # ====================================
+            score_job = calculate_site_score_task.delay(snapshot_id)
+            print(f"📊 Enqueued site score job: {score_job.id}")
             
         else:
             snapshot.save()
@@ -311,3 +313,48 @@ def create_comparison_task(snapshot_id, site_id):
         }
     finally:
         close_old_connections()
+
+@job('default')
+def calculate_site_score_task(snapshot_id):
+    """
+    Calculate quality scores for a site based on its snapshot
+    """
+    from .models import SiteSnapshot, SiteScore
+    from .services.scoring import SiteScoringService
+    
+    try:
+        snapshot = SiteSnapshot.objects.select_related('site').get(id=snapshot_id)
+        print(f"📊 Calculating scores for {snapshot.site.name}")
+        
+        # Run evaluation
+        service = SiteScoringService(snapshot.site.name)
+        scores = service.evaluate()
+        
+        # Create score record
+        site_score = SiteScore.objects.create(
+            site=snapshot.site,
+            snapshot=snapshot,
+            performance_score=scores.get('performance'),
+            seo_score=scores.get('seo'),
+            security_score=scores.get('security'),
+            availability_score=scores.get('availability'),
+            overall_score=scores.get('overall'),
+            page_load_time_ms=scores['metrics'].get('ttfb_ms'),
+            content_size_kb=scores['metrics'].get('content_size_kb'),
+            has_ssl=scores['metrics'].get('has_ssl', False),
+            has_security_headers=scores['metrics'].get('has_hsts', False),
+        )
+        
+        print(f"✅ Site score {site_score.overall_score} recorded for {snapshot.site.name}")
+        
+        return {
+            'snapshot_id': snapshot_id,
+            'score_id': site_score.id,
+            'overall_score': site_score.overall_score
+        }
+        
+    except Exception as e:
+        print(f"❌ Error calculating site score: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'snapshot_id': snapshot_id, 'error': str(e)}

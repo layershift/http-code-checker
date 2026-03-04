@@ -1,8 +1,11 @@
-from django.shortcuts import render
 from django.views.generic import ListView, DetailView
 from django.db.models import Count, Q
-from apps.monitoring.models import Server, Site, SiteSnapshot
+from apps.monitoring.models import Server, Site, SiteSnapshot, SiteScore
 from apps.infrastructure.models import IPAddress, IPClass
+from django.shortcuts import render, get_object_or_404 
+import json
+from django.db.models import Avg
+
 
 # Dashboard view
 
@@ -126,8 +129,6 @@ class SiteListView(ListView):
         return context
 
 
-# Site detail view
-# Site detail view
 class SiteDetailView(DetailView):
     model = Site
     template_name = 'monitoring/site_detail.html'
@@ -156,6 +157,25 @@ class SiteDetailView(DetailView):
         ).exclude(
             id=self.object.id
         )[:5]
+        
+        # ===== ADD SCORE CONTEXT =====
+        # Get latest score for this site
+        context['latest_score'] = SiteScore.objects.filter(
+            site=self.object
+        ).order_by('-calculated_at').first()
+        
+        # Get score count
+        context['score_count'] = SiteScore.objects.filter(
+            site=self.object
+        ).count()
+        
+        # Optional: Add average score
+        context['avg_score'] = SiteScore.objects.filter(
+            site=self.object
+        ).aggregate(Avg('overall_score'))['overall_score__avg']
+        
+        # Debug print (remove in production)
+        print(f"Site: {self.object.name}, Scores: {context['score_count']}, Latest: {context['latest_score']}")
 
         return context
 
@@ -220,3 +240,45 @@ def search_sites(request):
     ]
 
     return JsonResponse({'results': results})
+
+def site_score_history(request, site_id):
+    """View showing site score evolution over time"""
+    site = get_object_or_404(Site, id=site_id)
+    
+    # Get all scores for this site
+    scores = SiteScore.objects.filter(site=site).order_by('calculated_at')
+    
+    # Prepare data for charts
+    dates = [score.calculated_at.strftime('%Y-%m-%d %H:%M') for score in scores]
+    overall = [score.overall_score for score in scores]
+    performance = [score.performance_score for score in scores]
+    seo = [score.seo_score for score in scores]
+    security = [score.security_score for score in scores]
+    
+    # Calculate trends
+    if len(scores) > 1:
+        first = scores.first().overall_score
+        last = scores.last().overall_score
+        trend = last - first
+        trend_percentage = (trend / first * 100) if first else 0
+    else:
+        trend = 0
+        trend_percentage = 0
+    
+    context = {
+        'site': site,
+        'scores': scores,
+        'chart_data': json.dumps({
+            'dates': dates,
+            'overall': overall,
+            'performance': performance,
+            'seo': seo,
+            'security': security,
+        }),
+        'avg_score': scores.aggregate(Avg('overall_score'))['overall_score__avg'],
+        'latest_score': scores.last(),
+        'trend': trend,
+        'trend_percentage': trend_percentage,
+    }
+    
+    return render(request, 'monitoring/site_scores.html', context)

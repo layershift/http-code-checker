@@ -2,7 +2,7 @@
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from django.db.models import Avg, Count, Max, Min, Q
-from .models import Site, SiteSnapshot, ScreenshotComparison, Server
+from .models import Site, SiteSnapshot, ScreenshotComparison, Server, SiteScore
 
 @staff_member_required
 def comparison_dashboard(request):
@@ -84,3 +84,5 @@ def comparison_dashboard(request):
         'server_id': server_id,
     }
     return render(request, 'monitoring/comparison_dashboard.html', context)
+
+
