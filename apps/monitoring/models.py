@@ -32,6 +32,13 @@ class Server(models.Model):
 
     description = models.TextField(blank=True)
 
+    ip_address = models.GenericIPAddressField(
+        protocol='IPv4',
+        null=True,
+        blank=True,
+        help_text="Server IPv4 address"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
