@@ -106,7 +106,12 @@ class SiteSnapshot(models.Model):
         related_name="snapshots"
     )
 
-    screenshot = models.ImageField(upload_to=screenshot_upload_path, null=True, blank=True, max_length=500)
+    screenshot = models.ImageField(
+        upload_to=screenshot_upload_path, 
+        null=True, 
+        blank=True,
+        max_length=500
+    )
 
     http_status_code = models.PositiveIntegerField(null=True, blank=True)
 
@@ -115,9 +120,34 @@ class SiteSnapshot(models.Model):
     ssim_score = models.FloatField(null=True, blank=True)
 
     taken_at = models.DateTimeField(auto_now_add=True)
+    
+    # NEW: Baseline field
+    is_baseline = models.BooleanField(
+        default=False,
+        help_text="If True, this is the baseline snapshot for comparisons"
+    )
+
+    class Meta:
+        ordering = ['-taken_at']
+        # Ensure only one baseline per site
+        constraints = [
+            models.UniqueConstraint(
+                fields=['site', 'is_baseline'],
+                condition=models.Q(is_baseline=True),
+                name='unique_baseline_per_site'
+            )
+        ]
 
     def __str__(self):
-        return f"{self.site.name} - {self.taken_at}"
+        baseline = " [BASELINE]" if self.is_baseline else ""
+        return f"{self.site.name} - {self.taken_at}{baseline}"
+
+    def save(self, *args, **kwargs):
+        """Override save to handle baseline logic"""
+        if self.is_baseline:
+            # If this is being set as baseline, remove baseline from all other snapshots of this site
+            SiteSnapshot.objects.filter(site=self.site, is_baseline=True).exclude(pk=self.pk).update(is_baseline=False)
+        super().save(*args, **kwargs)
 
 
 
