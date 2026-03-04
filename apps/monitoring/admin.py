@@ -3,13 +3,14 @@ from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 from django.contrib import messages
-import threading
+from django.utils.safestring import mark_safe
 from .models import Site, Server, SiteSnapshot, ScreenshotComparison
 from .utils import capture_screenshot_for_snapshot
+from .tasks import capture_screenshot_task, create_comparison_task
 
 class SiteSnapshotInline(admin.TabularInline):
     model = SiteSnapshot
-    extra = 1  # Change to 1 to show an empty form
+    extra = 0
     readonly_fields = ['screenshot_preview', 'taken_at', 'http_status_code', 'content_length']
     fields = ['screenshot_preview', 'taken_at', 'http_status_code', 'content_length', 'ssim_score']
 
@@ -22,23 +23,105 @@ class SiteSnapshotInline(admin.TabularInline):
         return "No screenshot"
     screenshot_preview.short_description = "Preview"
 
+# monitoring/admin.py - Updated save_model with comparison
+# monitoring/admin.py - Fixed comparison_status method
+
 @admin.register(SiteSnapshot)
 class SiteSnapshotAdmin(admin.ModelAdmin):
-    list_display = ['site', 'taken_at', 'http_status_code', 'content_length', 'has_screenshot']
+    list_display = ['site', 'taken_at', 'http_status_code', 'content_length', 'has_screenshot', 'comparison_status']
     list_filter = ['site', 'http_status_code', 'taken_at']
-    readonly_fields = ['taken_at', 'screenshot_preview']
-    fields = ['site', 'http_status_code', 'content_length', 'ssim_score', 'screenshot', 'taken_at', 'screenshot_preview']
+    readonly_fields = ['taken_at', 'screenshot_preview', 'comparison_info']
+    fields = ['site', 'http_status_code', 'content_length', 'ssim_score', 'screenshot', 'taken_at', 
+              'screenshot_preview', 'comparison_info']
     
     # Make screenshot not required in the form
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
-        form.base_fields['screenshot'].required = False
+        if 'screenshot' in form.base_fields:
+            form.base_fields['screenshot'].required = False
         return form
 
     def has_screenshot(self, obj):
         return bool(obj.screenshot)
     has_screenshot.boolean = True
     has_screenshot.short_description = "Screenshot"
+    
+    def comparison_status(self, obj):
+        """Check if comparison exists for this snapshot"""
+        from .models import ScreenshotComparison
+        
+        # Check if this snapshot is used in any comparison
+        if hasattr(obj, 'previous_comparisons') and obj.previous_comparisons.exists():
+            comparison = obj.previous_comparisons.first()
+            return format_html(
+                '<span class="badge" style="background-color: #28a745; color: white; padding: 3px 7px; border-radius: 10px;">'
+                'SSIM: {}</span>',
+                f"{comparison.ssim_score:.3f}"  # This is the argument for format_html
+            )
+        elif hasattr(obj, 'next_comparisons') and obj.next_comparisons.exists():
+            comparison = obj.next_comparisons.first()
+            return format_html(
+                '<span class="badge" style="background-color: #28a745; color: white; padding: 3px 7px; border-radius: 10px;">'
+                'SSIM: {}</span>',
+                f"{comparison.ssim_score:.3f}"  # This is the argument for format_html
+            )
+        # When no comparison exists, return simple string (no format_html needed)
+        return mark_safe(
+            '<span class="badge" style="background-color: #ffc107; color: black; padding: 3px 7px; border-radius: 10px;">'
+            'Pending</span>'
+        )
+    comparison_status.short_description = "Comparison"
+    
+    def comparison_info(self, obj):
+        """Display comparison information"""
+        from .models import ScreenshotComparison
+        
+        # Check if this snapshot is used as current snapshot
+        comparisons_as_current = ScreenshotComparison.objects.filter(current_snapshot=obj).select_related('previous_snapshot')
+        comparisons_as_previous = ScreenshotComparison.objects.filter(previous_snapshot=obj).select_related('current_snapshot')
+        
+        html = '<div style="margin-top: 10px;">'
+        
+        if comparisons_as_current.exists():
+            for comp in comparisons_as_current:
+                html += format_html(
+                    '<div style="border: 1px solid #ddd; padding: 8px; margin-bottom: 5px; border-radius: 4px;">'
+                    '<strong>Comparison with previous snapshot:</strong><br>'
+                    'Previous: {}<br>'
+                    'SSIM: {:.4f}<br>'
+                    'Change: {:.2f}%<br>'
+                    'Changed pixels: {} / {}<br>'
+                    '</div>',
+                    comp.previous_snapshot.taken_at,
+                    comp.ssim_score,
+                    comp.percent_difference,
+                    comp.changed_pixels,
+                    comp.total_pixels
+                )
+        
+        if comparisons_as_previous.exists():
+            for comp in comparisons_as_previous:
+                html += format_html(
+                    '<div style="border: 1px solid #ddd; padding: 8px; margin-bottom: 5px; border-radius: 4px; background-color: #f8f9fa;">'
+                    '<strong>Comparison with next snapshot:</strong><br>'
+                    'Next: {}<br>'
+                    'SSIM: {:.4f}<br>'
+                    'Change: {:.2f}%<br>'
+                    'Changed pixels: {} / {}<br>'
+                    '</div>',
+                    comp.current_snapshot.taken_at,
+                    comp.ssim_score,
+                    comp.percent_difference,
+                    comp.changed_pixels,
+                    comp.total_pixels
+                )
+        
+        if not (comparisons_as_current.exists() or comparisons_as_previous.exists()):
+            html += '<p class="help">No comparisons yet. Comparison will be created automatically after screenshot capture.</p>'
+        
+        html += '</div>'
+        return mark_safe(html)
+    comparison_info.short_description = "Comparison Details"
 
     def screenshot_preview(self, obj):
         if obj and obj.screenshot:
@@ -49,92 +132,96 @@ class SiteSnapshotAdmin(admin.ModelAdmin):
         return "No screenshot uploaded yet"
     screenshot_preview.short_description = "Preview"
 
-    actions = ['capture_screenshots', 'recapture_failed_screenshots']
+    # Custom actions for RQ
+    actions = ['enqueue_screenshot_capture', 'enqueue_comparison']
 
-    def capture_screenshots(self, request, queryset):
+    def enqueue_screenshot_capture(self, request, queryset):
+        """Enqueue screenshot capture for selected snapshots"""
         count = 0
         for snapshot in queryset:
             if not snapshot.screenshot:
-                thread = threading.Thread(
-                    target=capture_screenshot_for_snapshot,
-                    args=(snapshot.id,)
-                )
-                thread.daemon = True
-                thread.start()
+                from .tasks import capture_screenshot_task
+                job = capture_screenshot_task.delay(snapshot.id, snapshot.site.name, snapshot.site.id)
                 count += 1
-                print(f"Started screenshot capture for snapshot {snapshot.id}")  # Debug
-
+                self.message_user(request, f"Enqueued screenshot capture for snapshot {snapshot.id} (Job: {job.id})")
+        
         if count:
-            self.message_user(
-                request,
-                f"Started screenshot capture for {count} snapshot(s) in background."
-            )
+            self.message_user(request, f"Enqueued {count} screenshot capture job(s)")
         else:
-            self.message_user(
-                request,
-                "Selected snapshots already have screenshots.",
-                level='WARNING'
-            )
-    capture_screenshots.short_description = "Capture screenshots for selected snapshots"
+            self.message_user(request, "Selected snapshots already have screenshots", level='WARNING')
+    enqueue_screenshot_capture.short_description = "Capture screenshots via RQ"
 
-    def recapture_failed_screenshots(self, request, queryset):
+    def enqueue_comparison(self, request, queryset):
+        """Enqueue comparison for selected snapshots"""
         count = 0
-        for snapshot in queryset.filter(http_status_code__gte=400):
-            thread = threading.Thread(
-                target=capture_screenshot_for_snapshot,
-                args=(snapshot.id,)
-            )
-            thread.daemon = True
-            thread.start()
-            count += 1
-            print(f"Started recapture for snapshot {snapshot.id}")  # Debug
-
+        for snapshot in queryset:
+            if snapshot.screenshot:
+                from .tasks import create_comparison_task
+                job = create_comparison_task.delay(snapshot.id, snapshot.site.id)
+                count += 1
+                self.message_user(request, f"Enqueued comparison for snapshot {snapshot.id} (Job: {job.id})")
+            else:
+                self.message_user(request, f"Snapshot {snapshot.id} has no screenshot yet", level='WARNING')
+        
         if count:
-            self.message_user(
-                request,
-                f"Started recapture for {count} failed snapshot(s) in background."
-            )
-        else:
-            self.message_user(
-                request,
-                "No failed snapshots selected.",
-                level='WARNING'
-            )
-    recapture_failed_screenshots.short_description = "Recapture screenshots for failed snapshots"
+            self.message_user(request, f"Enqueued {count} comparison job(s)")
+    enqueue_comparison.short_description = "Create comparisons via RQ"
 
     def save_model(self, request, obj, form, change):
         """
-        Override save_model to capture screenshot for new snapshots
+        Override save_model to enqueue RQ jobs for new snapshots
         """
-        print(f"save_model called - change: {change}, pk: {obj.pk}")  # Debug
-        
-        # Check if this is a new snapshot (no ID yet)
         is_new = not obj.pk
-        screenshot_empty = not obj.screenshot
-        
-        print(f"is_new: {is_new}, screenshot_empty: {screenshot_empty}")  # Debug
         
         # Save the object first
         super().save_model(request, obj, form, change)
-        print(f"Object saved with ID: {obj.pk}")  # Debug
         
-        # If it's a new snapshot or screenshot is empty, trigger screenshot capture
-        if is_new or screenshot_empty:
-            print(f"Triggering screenshot capture for snapshot {obj.pk}")  # Debug
-            messages.info(request, f"Snapshot created. Capturing screenshot in background...")
+        # If it's a new snapshot and no screenshot provided, enqueue RQ jobs
+        if is_new and not obj.screenshot:
+            from django_rq import get_queue
+            from .tasks import capture_screenshot_task, create_comparison_task
             
-            # Start background thread to capture screenshot
-            thread = threading.Thread(
-                target=capture_screenshot_for_snapshot,
-                args=(obj.id,)
+            # Get the default queue
+            queue = get_queue('default')
+            
+            # Enqueue screenshot capture task
+            screenshot_job = queue.enqueue(
+                capture_screenshot_task,
+                obj.id,
+                obj.site.name,
+                obj.site.id
             )
-            thread.daemon = True
-            thread.start()
-
-    # Add this to see if the form is being saved
-    def response_add(self, request, obj, post_url_continue=None):
-        print(f"response_add called for object {obj.pk}")  # Debug
-        return super().response_add(request, obj, post_url_continue)
+            
+            # Enqueue comparison task to run AFTER screenshot job
+            comparison_job = queue.enqueue(
+                create_comparison_task,
+                obj.id,
+                obj.site.id,
+                depends_on=screenshot_job  # This creates the dependency!
+            )
+            
+            messages.info(
+                request, 
+                f'✅ Snapshot created.<br>'
+                f'📸 Screenshot job: {screenshot_job.id[:8]}...<br>'
+                f'🔍 Comparison job: {comparison_job.id[:8]}... (will run after screenshot)'
+            )
+            
+            print(f"🚀 Enqueued screenshot job {screenshot_job.id} for snapshot {obj.id}")
+            print(f"🔗 Enqueued comparison job {comparison_job.id} (depends on {screenshot_job.id})")
+            
+        elif is_new and obj.screenshot:
+            # If screenshot was provided manually, still try to create comparison
+            from django_rq import get_queue
+            from .tasks import create_comparison_task
+            
+            queue = get_queue('default')
+            comparison_job = queue.enqueue(
+                create_comparison_task,
+                obj.id,
+                obj.site.id
+            )
+            messages.info(request, f'Snapshot created with screenshot. Comparison job enqueued: {comparison_job.id[:8]}...')
 
 @admin.register(Site)
 class SiteAdmin(admin.ModelAdmin):
