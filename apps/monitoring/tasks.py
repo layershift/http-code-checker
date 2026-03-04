@@ -1,16 +1,20 @@
 # monitoring/tasks.py
 import os
+import sys
 import tempfile
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db import close_old_connections
-from django_rq import job
 from rq import get_current_job
 from playwright.sync_api import sync_playwright
+from datetime import timedelta
+from django_rq import job, get_queue
+from rq import get_current_job
+from rq.registry import StartedJobRegistry, ScheduledJobRegistry, FinishedJobRegistry
+
 
 print("🔄 Loading tasks module...")
 
-@job('default')
 @job('default')
 def capture_screenshot_task(snapshot_id, site_name, site_id):
     """
@@ -358,3 +362,211 @@ def calculate_site_score_task(snapshot_id):
         import traceback
         traceback.print_exc()
         return {'snapshot_id': snapshot_id, 'error': str(e)}
+    
+
+import traceback
+
+@job('monitoring')
+def monitor_site_score_task(site_id):
+    """
+    Monitoring task - calculates site score and schedules next run
+    """
+    current_job = get_current_job()
+    current_job_id = current_job.id if current_job else None
+    
+    print(f"\n{'='*60}")
+    print(f"🔍 [Job {current_job_id}] Starting score monitoring for site {site_id}")
+    print(f"{'='*60}")
+    sys.stdout.flush()
+    
+    close_old_connections()
+    
+    try:
+        from .models import Site, SiteSnapshot, SiteScore
+        from .services.scoring import SiteScoringService
+        
+        # Get site
+        site = Site.objects.get(id=site_id)
+        print(f"📊 Site: {site.name}")
+        print(f"📊 Continuous monitoring: {site.continuous_monitoring}")
+        print(f"📊 Frequency: {site.monitoring_frequency} minutes")
+        sys.stdout.flush()
+        
+        # Check if site should be monitored
+        if not site.continuous_monitoring or not site.is_active:
+            print(f"⏹️ Site {site.name} has monitoring disabled, skipping")
+            sys.stdout.flush()
+            return {
+                'site_id': site_id,
+                'status': 'skipped',
+                'reason': 'monitoring_disabled'
+            }
+        
+        # Create a lightweight "score-only" snapshot
+        snapshot = SiteSnapshot.objects.create(
+            site=site,
+            http_status_code=0,
+            content_length=0
+        )
+        print(f"✅ Created snapshot ID: {snapshot.id}")
+        sys.stdout.flush()
+        
+        # Calculate site score
+        scoring_service = SiteScoringService(site.name)
+        scores = scoring_service.evaluate()
+        
+        # Create score record
+        site_score = SiteScore.objects.create(
+            site=site,
+            snapshot=snapshot,
+            performance_score=scores.get('performance'),
+            seo_score=scores.get('seo'),
+            security_score=scores.get('security'),
+            availability_score=scores.get('availability'),
+            overall_score=scores.get('overall'),
+            page_load_time_ms=scores['metrics'].get('ttfb_ms'),
+            content_size_kb=scores['metrics'].get('content_size_kb'),
+            has_ssl=scores['metrics'].get('has_ssl', False),
+        )
+        
+        print(f"✅ Score calculated: {site_score.overall_score:.1f}")
+        sys.stdout.flush()
+        
+        # Update snapshot with status code
+        snapshot.http_status_code = scores['metrics'].get('status_code', 0)
+        snapshot.save(update_fields=['http_status_code'])
+        
+        # Update last monitored time
+        site.last_monitored = timezone.now()
+        site.save(update_fields=['last_monitored'])
+        
+        # SCHEDULE NEXT RUN - EXCLUDE CURRENT JOB
+        print(f"\n⏰ Attempting to schedule next run...")
+        sys.stdout.flush()
+        
+        # Calculate next run time
+        next_run = timezone.now() + timedelta(minutes=site.monitoring_frequency)
+        print(f"📅 Next run calculated for: {next_run}")
+        sys.stdout.flush()
+        
+        # Check if there's already another scheduled job for this site (excluding current)
+        queue = get_queue('monitoring')
+        
+        if not has_other_pending_monitoring(site_id, current_job_id):
+            # Schedule the next job
+            next_job = queue.enqueue_at(
+                next_run,
+                monitor_site_score_task,
+                site_id
+            )
+            print(f"✅ Scheduled next job: {next_job.id} for {next_run}")
+            sys.stdout.flush()
+        else:
+            print(f"⏭️ Another job already pending for site {site_id}, skipping scheduling")
+            sys.stdout.flush()
+        
+        print(f"\n✅ Job completed successfully")
+        print(f"{'='*60}")
+        sys.stdout.flush()
+        
+        return {
+            'site_id': site_id,
+            'snapshot_id': snapshot.id,
+            'score_id': site_score.id,
+            'overall_score': site_score.overall_score,
+            'next_run': next_run.isoformat()
+        }
+        
+    except Site.DoesNotExist:
+        print(f"❌ Site {site_id} not found")
+        sys.stdout.flush()
+        return {'site_id': site_id, 'error': 'Site not found'}
+    except Exception as e:
+        print(f"❌ Error monitoring site: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        return {'site_id': site_id, 'error': str(e)}
+    finally:
+        close_old_connections()
+
+
+def has_other_pending_monitoring(site_id, current_job_id=None):
+    """Check if there's another pending or running job for this site (excluding current)"""
+    from django_rq import get_queue
+    from rq.job import Job
+    from rq.registry import StartedJobRegistry, ScheduledJobRegistry
+    
+    queue = get_queue('monitoring')
+    connection = queue.connection
+    
+    # Check scheduled jobs (future)
+    scheduled = ScheduledJobRegistry('monitoring', connection)
+    for job_id in scheduled.get_job_ids():
+        if job_id == current_job_id:
+            continue
+        try:
+            job = Job.fetch(job_id, connection=connection)
+            args = job.args
+            if args and len(args) > 0 and args[0] == site_id:
+                print(f"⚠️ Found other SCHEDULED job for site {site_id}: {job_id}")
+                return True
+        except:
+            continue
+    
+    # Check started jobs (currently running) - exclude current
+    started = StartedJobRegistry('monitoring', connection)
+    for job_id in started.get_job_ids():
+        if job_id == current_job_id:
+            continue
+        try:
+            job = Job.fetch(job_id, connection=connection)
+            args = job.args
+            if args and len(args) > 0 and args[0] == site_id:
+                print(f"⚠️ Found other STARTED job for site {site_id}: {job_id}")
+                return True
+        except:
+            continue
+    
+    return False
+
+
+def has_pending_monitoring(site_id):
+    """Legacy function - checks if any job exists (including current)"""
+    return has_other_pending_monitoring(site_id, None)
+
+
+def list_all_jobs(request):
+    """List all jobs in the monitoring queue"""
+    from django.http import JsonResponse
+    from django_rq import get_queue
+    from rq.job import Job
+    from rq.registry import StartedJobRegistry, ScheduledJobRegistry, FinishedJobRegistry, FailedJobRegistry
+    
+    queue = get_queue('monitoring')
+    connection = queue.connection
+    
+    result = {}
+    
+    registries = [
+        ('scheduled', ScheduledJobRegistry('monitoring', connection)),
+        ('started', StartedJobRegistry('monitoring', connection)),
+        ('finished', FinishedJobRegistry('monitoring', connection)),
+        ('failed', FailedJobRegistry('monitoring', connection)),
+    ]
+    
+    for name, registry in registries:
+        jobs = []
+        for job_id in registry.get_job_ids():
+            try:
+                job = Job.fetch(job_id, connection=connection)
+                jobs.append({
+                    'id': job_id,
+                    'site_id': job.args[0] if job.args else None,
+                    'enqueued_at': job.enqueued_at.isoformat() if job.enqueued_at else None,
+                })
+            except:
+                jobs.append({'id': job_id, 'error': 'Could not fetch'})
+        result[name] = jobs
+    
+    return JsonResponse(result)

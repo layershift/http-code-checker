@@ -6,6 +6,7 @@ from django.utils import timezone
 import os 
 import socket
 from django.urls import reverse
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 def screenshot_upload_path(instance, filename):
     """
@@ -73,7 +74,24 @@ class Site(models.Model):
         blank=True
     )
 
+    continuous_monitoring = models.BooleanField(
+        default=False,
+        help_text="Enable automatic periodic monitoring"
+    )
+
+    monitoring_frequency = models.PositiveIntegerField(
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(1440)],  # Min 1 minute, Max 24 hours
+        help_text="Monitoring frequency in minutes (1-1440)"
+    )
+
     is_active = models.BooleanField(default=True)
+
+    last_monitored = models.DateTimeField(
+            null=True, 
+            blank=True,
+            help_text="Last time this site was automatically monitored"
+        )
 
     created_at = models.DateTimeField(auto_now_add=True)
     
@@ -98,6 +116,8 @@ class Site(models.Model):
         except Exception as e:
             print(f"Error resolving IP for {self.name}: {e}")
             return None
+    
+    
         
     def get_absolute_url(self):
         """Return the URL to access this specific site"""

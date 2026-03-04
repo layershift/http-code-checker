@@ -245,26 +245,57 @@ class SiteSnapshotAdmin(admin.ModelAdmin):
 
 @admin.register(Site)
 class SiteAdmin(admin.ModelAdmin):
-    list_display = ['name', 'server', 'is_active', 'created_at', 'snapshot_count']
-    list_filter = ['server', 'is_active']
-    search_fields = ['name']
-    inlines = [SiteSnapshotInline]
-    readonly_fields = ['resolved_ip', 'snapshot_quick_view']
+    list_display = ['name', 'server', 'resolved_ip', 'is_active', 
+                   'continuous_monitoring', 'monitoring_frequency', 'created_at']
+    list_filter = ['server', 'is_active', 'continuous_monitoring']
+    search_fields = ['name', 'resolved_ip']
+    readonly_fields = ['resolved_ip', 'created_at']  # Keep created_at readonly
+    
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'server', 'is_active')
         }),
         ('IP Information', {
             'fields': ('server_ip', 'resolved_ip'),
-            'description': 'Server ip: Manually assigned IP (optional)<br>Resolved ip: Automatically resolved from DNS'
+            'classes': ('collapse',)
         }),
-        ('Snapshots', {
-            'fields': ('snapshot_quick_view',),
+        ('Monitoring Settings', {
+            'fields': ('continuous_monitoring', 'monitoring_frequency'),
+            'description': 'Configure automatic monitoring for this site'
+        }),
+        ('Timestamps', {
+            'fields': ('created_at',),
             'classes': ('collapse',)
         }),
     )
     
-    actions = ['resolve_ips_selected']
+    actions = ['enable_continuous_monitoring', 'disable_continuous_monitoring', 
+               'set_frequency_5min', 'set_frequency_15min', 'set_frequency_60min']
+    
+    def enable_continuous_monitoring(self, request, queryset):
+        updated = queryset.update(continuous_monitoring=True)
+        self.message_user(request, f"Enabled continuous monitoring for {updated} sites")
+    enable_continuous_monitoring.short_description = "Enable continuous monitoring"
+    
+    def disable_continuous_monitoring(self, request, queryset):
+        updated = queryset.update(continuous_monitoring=False)
+        self.message_user(request, f"Disabled continuous monitoring for {updated} sites")
+    disable_continuous_monitoring.short_description = "Disable continuous monitoring"
+    
+    def set_frequency_5min(self, request, queryset):
+        updated = queryset.update(monitoring_frequency=5)
+        self.message_user(request, f"Set monitoring frequency to 5 minutes for {updated} sites")
+    set_frequency_5min.short_description = "Set frequency to 5 minutes"
+    
+    def set_frequency_15min(self, request, queryset):
+        updated = queryset.update(monitoring_frequency=15)
+        self.message_user(request, f"Set monitoring frequency to 15 minutes for {updated} sites")
+    set_frequency_15min.short_description = "Set frequency to 15 minutes"
+    
+    def set_frequency_60min(self, request, queryset):
+        updated = queryset.update(monitoring_frequency=60)
+        self.message_user(request, f"Set monitoring frequency to 60 minutes for {updated} sites")
+    set_frequency_60min.short_description = "Set frequency to 60 minutes"
 
     def snapshot_count(self, obj):
         count = obj.snapshots.count()
