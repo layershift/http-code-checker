@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_rq',
     "rest_framework",
     "apps.accounts",
     "apps.api",
@@ -52,7 +53,28 @@ INSTALLED_APPS = [
     "apps.infrastructure"
 ]
 
+RQ_QUEUES = {
+    'default': {
+        'HOST': 'localhost',
+        'PORT': 6379,
+        'DB': 0,
+        'DEFAULT_TIMEOUT': 360,
+    },
+    'high': {
+        'HOST': 'localhost',
+        'PORT': 6379,
+        'DB': 0,
+        'DEFAULT_TIMEOUT': 500,
+    },
+    'low': {
+        'HOST': 'localhost',
+        'PORT': 6379,
+        'DB': 0,
+        'DEFAULT_TIMEOUT': 180,
+    },
+}
 
+RQ_SHOW_ADMIN_LINK = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
