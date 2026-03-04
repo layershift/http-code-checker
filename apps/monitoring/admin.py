@@ -28,13 +28,31 @@ class SiteSnapshotInline(admin.TabularInline):
 
 @admin.register(SiteSnapshot)
 class SiteSnapshotAdmin(admin.ModelAdmin):
-    list_display = ['site', 'taken_at', 'http_status_code', 'content_length', 'has_screenshot', 'comparison_status']
-    list_filter = ['site', 'http_status_code', 'taken_at']
+    list_display = ['site', 'taken_at', 'http_status_code', 'content_length', 'is_baseline', 'has_screenshot', 'comparison_status']
+    list_filter = ['site', 'http_status_code', 'taken_at', 'is_baseline']
     readonly_fields = ['taken_at', 'screenshot_preview', 'comparison_info']
-    fields = ['site', 'http_status_code', 'content_length', 'ssim_score', 'screenshot', 'taken_at', 
+    fields = ['site', 'http_status_code', 'content_length', 'ssim_score', 'is_baseline', 'screenshot', 'taken_at', 
               'screenshot_preview', 'comparison_info']
     
-    # Make screenshot not required in the form
+    actions = ['enqueue_screenshot_capture', 'enqueue_comparison', 'set_as_baseline']
+    
+    def set_as_baseline(self, request, queryset):
+        """Set selected snapshot as baseline (will unset others)"""
+        if queryset.count() > 1:
+            self.message_user(request, "Please select only one snapshot to set as baseline", level='ERROR')
+            return
+        
+        snapshot = queryset.first()
+        if not snapshot.screenshot:
+            self.message_user(request, "Cannot set as baseline: snapshot has no screenshot", level='ERROR')
+            return
+        
+        # This will trigger the save() method which handles the unique constraint
+        snapshot.is_baseline = True
+        snapshot.save()
+        self.message_user(request, f"Snapshot {snapshot.id} set as baseline for {snapshot.site.name}")
+    set_as_baseline.short_description = "Set as baseline for this site"
+    
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
         if 'screenshot' in form.base_fields:

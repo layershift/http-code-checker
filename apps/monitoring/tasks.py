@@ -149,7 +149,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
 @job('default')
 def create_comparison_task(snapshot_id, site_id):
     """
-    Task 2: Create comparison with previous snapshot
+    Task 2: Create comparison with baseline snapshot
     """
     current_job = get_current_job()
     print(f"🔍 [Job {current_job.id}] Starting comparison for snapshot {snapshot_id}")
@@ -173,27 +173,41 @@ def create_comparison_task(snapshot_id, site_id):
             }
         
         print(f"✅ Current snapshot has screenshot: {current_snapshot.screenshot.url}")
-        print(f"📸 Current screenshot taken at: {current_snapshot.taken_at}")
         
-        # Find previous snapshot with screenshot
-        previous_snapshot = SiteSnapshot.objects.filter(
+        # Find baseline snapshot for this site
+        baseline_snapshot = SiteSnapshot.objects.filter(
             site_id=site_id,
+            is_baseline=True,
             screenshot__isnull=False
-        ).exclude(id=snapshot_id).order_by('-taken_at').first()
+        ).first()
         
-        if not previous_snapshot:
-            print(f"📭 No previous snapshot found for comparison")
+        if not baseline_snapshot:
+            print(f"📭 No baseline snapshot found for this site")
+            # If no baseline exists, make this the baseline if it's the first one
+            if SiteSnapshot.objects.filter(site_id=site_id, screenshot__isnull=False).count() == 1:
+                current_snapshot.is_baseline = True
+                current_snapshot.save()
+                print(f"✅ Set snapshot {snapshot_id} as baseline (first screenshot)")
             return {
                 'snapshot_id': snapshot_id,
                 'comparison_created': False,
-                'reason': 'no_previous'
+                'reason': 'no_baseline'
             }
         
-        print(f"✅ Found previous snapshot ID: {previous_snapshot.id} from {previous_snapshot.taken_at}")
+        # Don't compare with itself
+        if baseline_snapshot.id == current_snapshot.id:
+            print(f"ℹ️ Current snapshot is the baseline, no comparison needed")
+            return {
+                'snapshot_id': snapshot_id,
+                'comparison_created': False,
+                'reason': 'is_baseline'
+            }
+        
+        print(f"✅ Found baseline snapshot ID: {baseline_snapshot.id} from {baseline_snapshot.taken_at}")
         
         # Check if comparison already exists
         existing_comparison = ScreenshotComparison.objects.filter(
-            previous_snapshot=previous_snapshot,
+            previous_snapshot=baseline_snapshot,
             current_snapshot=current_snapshot
         ).first()
         
@@ -211,7 +225,7 @@ def create_comparison_task(snapshot_id, site_id):
             print(f"📁 Created temp dir for comparison: {temp_dir}")
             
             # Compare screenshots
-            result = compare_screenshots(previous_snapshot, current_snapshot, output_dir=temp_dir)
+            result = compare_screenshots(baseline_snapshot, current_snapshot, output_dir=temp_dir)
             
             if result.get('error'):
                 print(f"❌ Comparison failed: {result['error']}")
@@ -229,14 +243,13 @@ def create_comparison_task(snapshot_id, site_id):
                     'error': 'No SSIM score returned'
                 }
             
-            print(f"📊 SSIM Score: {result['ssim_score']:.4f}")
-            print(f"📊 Change: {result['percent_difference']:.2f}%")
-            print(f"📊 Changed pixels: {result['changed_pixels']}/{result['total_pixels']}")
+            print(f"📊 SSIM Score vs Baseline: {result['ssim_score']:.4f}")
+            print(f"📊 Change from Baseline: {result['percent_difference']:.2f}%")
             
             # Create comparison object
             comparison = ScreenshotComparison.objects.create(
                 site_id=site_id,
-                previous_snapshot=previous_snapshot,
+                previous_snapshot=baseline_snapshot,  # Always baseline as previous
                 current_snapshot=current_snapshot,
                 ssim_score=result['ssim_score'],
                 percent_difference=result['percent_difference'],
@@ -250,7 +263,7 @@ def create_comparison_task(snapshot_id, site_id):
                 with open(result['heatmap_image_path'], 'rb') as f:
                     heatmap_data = f.read()
                 comparison.heatmap.save(
-                    f"heatmap_{previous_snapshot.id}_vs_{current_snapshot.id}.png",
+                    f"heatmap_baseline_vs_{current_snapshot.id}.png",
                     ContentFile(heatmap_data)
                 )
                 print(f"✅ Saved heatmap")
@@ -260,23 +273,20 @@ def create_comparison_task(snapshot_id, site_id):
                 with open(result['diff_image_path'], 'rb') as f:
                     diff_data = f.read()
                 comparison.diff_image.save(
-                    f"diff_{previous_snapshot.id}_vs_{current_snapshot.id}.png",
+                    f"diff_baseline_vs_{current_snapshot.id}.png",
                     ContentFile(diff_data)
                 )
                 print(f"✅ Saved diff image")
             
-            print(f"✅ Comparison completed for snapshot {snapshot_id}")
-            
-            # Check for suspicious results
-            if result.get('warning'):
-                print(f"⚠️ Comparison warning: {result['warning']}")
+            print(f"✅ Comparison with baseline completed for snapshot {snapshot_id}")
             
             return {
                 'snapshot_id': snapshot_id,
                 'comparison_created': True,
                 'comparison_id': comparison.id,
                 'ssim_score': result['ssim_score'],
-                'percent_difference': result['percent_difference']
+                'percent_difference': result['percent_difference'],
+                'baseline_id': baseline_snapshot.id
             }
             
     except Exception as e:
@@ -290,4 +300,3 @@ def create_comparison_task(snapshot_id, site_id):
         }
     finally:
         close_old_connections()
-        print(f"🏁 Comparison task finished for snapshot {snapshot_id}")
