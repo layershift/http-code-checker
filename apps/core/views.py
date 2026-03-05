@@ -5,11 +5,14 @@ from apps.infrastructure.models import IPAddress, IPClass
 from django.shortcuts import render, get_object_or_404 
 import json
 from django.db.models import Avg
+from apps.core.decorators.decorators import ip_allow
+from django.utils.decorators import method_decorator
+
 
 
 # Dashboard view
 
-
+@ip_allow(mode='master_only')
 def dashboard(request):
     # Get statistics
     total_servers = Server.objects.count()
@@ -49,7 +52,7 @@ def dashboard(request):
     return render(request, 'monitoring/dashboard.html', context)
 
 
-# Server list view
+@method_decorator(ip_allow(mode='master_only'), name='dispatch')
 class ServerListView(ListView):
     model = Server
     template_name = 'monitoring/server_list.html'
@@ -68,7 +71,7 @@ class ServerListView(ListView):
         return context
 
 
-# Server detail view
+@method_decorator(ip_allow(mode='master_only'), name='dispatch')
 class ServerDetailView(DetailView):
     model = Server
     template_name = 'monitoring/server_detail.html'
@@ -122,7 +125,7 @@ class ServerDetailView(DetailView):
         return context
 
 
-# Site list view
+@method_decorator(ip_allow(mode='master_only'), name='dispatch')
 class SiteListView(ListView):
     model = Site
     template_name = 'monitoring/site_list.html'
@@ -168,6 +171,7 @@ class SiteListView(ListView):
         return context
 
 
+@method_decorator(ip_allow(mode='master_only'), name='dispatch')
 class SiteDetailView(DetailView):
     model = Site
     template_name = 'monitoring/site_detail.html'
@@ -218,7 +222,7 @@ class SiteDetailView(DetailView):
 
         return context
 
-# API-like views for AJAX requests (optional)
+
 def get_server_stats(request, pk):
     """Return server statistics as JSON"""
     from django.http import JsonResponse
