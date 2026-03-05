@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "apps.monitoring.apps.MonitoringConfig",
     "apps.infrastructure",
     "django_cleanup",
+    "drf_spectacular",
 ]
 
 RQ_QUEUES = {
