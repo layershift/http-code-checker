@@ -1,7 +1,7 @@
 # decorators.py
 import os
 from django.core.exceptions import PermissionDenied
-from apps.core.models import IPAddress
+from apps.infrastructure.models import IPAddress
 import ipaddress
 
 def retrieve_user_ip(request):
@@ -62,7 +62,7 @@ def ip_allow(mode):
                     master_list = [ip.strip() for ip in master_ips.split(',') if ip.strip()]
                     allowed_ips.extend(master_list)
                 
-                db_ips = list(IPAddress.objects.all().values_list('address', flat=True))
+                db_ips = list(IPAddress.objects.all().values_list('ip_address', flat=True))
                 allowed_ips.extend(db_ips)
                 
                 if not allowed_ips:

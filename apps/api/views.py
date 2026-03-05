@@ -12,6 +12,8 @@ from apps.monitoring.tasks import capture_screenshot_task
 import json
 import ipaddress
 import inspect
+from apps.core.decorators.decorators import ip_allow
+
 
 def get_client_ip(request):
     """Extract client IP from request"""
@@ -34,6 +36,8 @@ def get_caller_info():
             return 'management'
     return 'unknown'
 
+
+@ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["GET", "POST", "DELETE"])
 def handle_servers(request):
@@ -260,6 +264,7 @@ def handle_servers(request):
             }, status=500)
         
 
+@ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["GET", "POST", "DELETE", "PATCH"])
 def handle_sites(request):
@@ -719,6 +724,7 @@ def handle_sites(request):
             }, status=500)
         
 
+@ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["POST"])
 def trigger_snapshot(request):
@@ -855,6 +861,7 @@ def trigger_snapshot(request):
         }, status=500)
 
 
+@ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["GET"])
 def get_snapshot_status(request, snapshot_id):
@@ -915,6 +922,7 @@ def get_snapshot_status(request, snapshot_id):
         }, status=500)
 
 
+@ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["GET"])
 def list_snapshots(request, site_name=None):
