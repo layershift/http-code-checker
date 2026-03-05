@@ -55,6 +55,23 @@ INSTALLED_APPS = [
     "drf_spectacular",
 ]
 
+REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Monitoring API',
+    'DESCRIPTION': 'API for monitoring websites, snapshots, and comparisons',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,
+        'displayOperationId': True,
+    },
+}
+
 RQ_QUEUES = {
     'default': {
         'HOST': 'localhost',
