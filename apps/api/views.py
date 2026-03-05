@@ -8,11 +8,15 @@ from django.views.decorators.http import require_http_methods
 from django.db import transaction
 from django.db.models import Count
 from apps.monitoring.models import Server, Site, SiteSnapshot, ScreenshotComparison
-from apps.monitoring.tasks import capture_screenshot_task
+from apps.monitoring.tasks import monitor_site_score_task, capture_screenshot_task, create_comparison_task
 import json
 import ipaddress
 import inspect
 from apps.core.decorators.decorators import ip_allow
+import threading
+import time
+from apps.monitoring.utils import Notify
+from datetime import datetime
 
 
 def get_client_ip(request):
@@ -996,3 +1000,353 @@ def list_snapshots(request, site_name=None):
             'has_next': (offset + limit) < snapshots.count()
         }
     })
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def dispatch_comparison(request):
+    """
+    API endpoint to trigger complete monitoring for a server or domain
+    POST payload: {"server": "server_name"} or {"domain": "example.com"}
+    Runs: snapshot + comparison + site score
+    Returns: "Success" via Notify.send() when all jobs complete
+    """
+    try:
+        # Parse JSON data
+        if request.content_type == 'application/json':
+            data = json.loads(request.body)
+        else:
+            data = request.POST.dict()
+        
+        server_name = data.get('server')
+        domain_name = data.get('domain') or data.get('site') or data.get('name')
+        
+        if not server_name and not domain_name:
+            return JsonResponse({
+                'status': 'error',
+                'message': 'Either "server" or "domain" is required in payload'
+            }, status=400)
+        
+        results = {
+            'target': {},
+            'sites': [],
+            'start_time': datetime.now().isoformat()
+        }
+        
+        queue = get_queue('default')
+        
+        # CASE 1: Monitor a specific domain
+        if domain_name:
+            try:
+                site = Site.objects.get(name=domain_name.lower().strip())
+                results['target'] = {
+                    'type': 'domain',
+                    'name': site.name,
+                    'id': site.id
+                }
+                
+                # Create and enqueue jobs for this site
+                job_ids = enqueue_site_monitoring(site, queue)
+                
+                results['sites'].append({
+                    'name': site.name,
+                    'jobs': job_ids
+                })
+                
+            except Site.DoesNotExist:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'Domain "{domain_name}" not found'
+                }, status=404)
+        
+        # CASE 2: Monitor all sites on a server
+        elif server_name:
+            try:
+                server = Server.objects.get(name=server_name)
+                sites = server.domains.filter(is_active=True)
+                
+                results['target'] = {
+                    'type': 'server',
+                    'name': server.name,
+                    'id': server.id,
+                    'site_count': sites.count()
+                }
+                
+                for site in sites:
+                    job_ids = enqueue_site_monitoring(site, queue)
+                    
+                    results['sites'].append({
+                        'name': site.name,
+                        'jobs': job_ids
+                    })
+                
+            except Server.DoesNotExist:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'Server "{server_name}" not found'
+                }, status=404)
+        
+        # Start background task to wait for completion and send success notification
+        thread = threading.Thread(
+            target=wait_for_completion_and_notify,
+            args=(results['target'], results['sites'], results['start_time'])
+        )
+        thread.daemon = True
+        thread.start()
+        
+        # Return immediate response
+        response = {
+            'status': 'success',
+            'message': f'Monitoring dispatched for {len(results["sites"])} site(s)',
+            'target': results['target'],
+            'notification': 'Success message will be sent when all jobs complete'
+        }
+        
+        return JsonResponse(response, status=202)
+        
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'status': 'error',
+            'message': 'Invalid JSON data'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+
+def enqueue_site_monitoring(site, queue):
+    """Helper function to enqueue all monitoring jobs for a site"""
+    
+    # Create snapshot
+    snapshot = SiteSnapshot.objects.create(
+        site=site,
+        http_status_code=0,
+        content_length=0
+    )
+    
+    # Enqueue screenshot task
+    screenshot_job = queue.enqueue(
+        capture_screenshot_task,
+        snapshot.id,
+        site.name,
+        site.id
+    )
+    
+    # Enqueue comparison task (depends on screenshot)
+    comparison_job = queue.enqueue(
+        create_comparison_task,
+        snapshot.id,
+        site.id,
+        depends_on=screenshot_job
+    )
+    
+    # Enqueue score task (depends on screenshot)
+    score_job = queue.enqueue(
+        monitor_site_score_task,
+        site.id,
+        depends_on=screenshot_job
+    )
+    
+    return {
+        'screenshot': screenshot_job.id,
+        'comparison': comparison_job.id,
+        'score': score_job.id
+    }
+
+
+def wait_for_completion_and_notify(target, sites_data, start_time):
+    """Wait for all jobs to complete, then send monitoring results via Notify.send()"""
+    from rq.job import Job
+    from django_rq import get_queue
+    from datetime import datetime
+    import time
+    from apps.monitoring.util.evaluator import SiteEvaluator
+    
+    queue = get_queue('default')
+    connection = queue.connection
+    
+    # Collect all job IDs
+    all_job_ids = []
+    for site in sites_data:
+        for job_type, job_id in site['jobs'].items():
+            all_job_ids.append(job_id)
+    
+    total_jobs = len(all_job_ids)
+    print(f"⏳ Waiting for {total_jobs} jobs to complete...")
+    
+    # Wait for all jobs to complete
+    max_wait = 300  # 5 minutes max
+    waited = 0
+    completed_jobs = 0
+    
+    while waited < max_wait and completed_jobs < total_jobs:
+        completed_jobs = 0
+        for job_id in all_job_ids:
+            try:
+                job = Job.fetch(job_id, connection=connection)
+                status = job.get_status()
+                if status in ['finished', 'failed']:
+                    completed_jobs += 1
+            except:
+                pass
+        
+        if completed_jobs < total_jobs:
+            time.sleep(5)
+            waited += 5
+    
+    # Calculate duration
+    end_time = datetime.now()
+    duration = (end_time - datetime.fromisoformat(start_time)).total_seconds()
+    
+    target_name = target.get('name', 'Unknown')
+    target_type = target.get('type', 'target')
+    
+    # Build monitoring results using SiteEvaluator
+    monitoring_lines = []
+    all_pass = True
+    
+    for site_info in sites_data:
+        site_name = site_info['name']
+        evaluator = SiteEvaluator(site_name)
+        
+        if evaluator.is_valid():
+            passed, text = evaluator.get_monitoring_text(compact=False)
+            print(f"✅ Evaluated {site_name}: {'PASS' if passed else 'FAIL'} {text}")
+            #monitoring_lines.append(text)
+            if not passed:
+                monitoring_lines.append(text)
+                all_pass = False
+        else:
+            monitoring_lines.append(f"| {site_name} | Error: {evaluator.error}")
+            all_pass = False
+    
+    # Combine all monitoring texts
+    if target_type == 'server':
+        # For servers, concatenate all texts with newlines
+        monitoring_text = "\n".join(monitoring_lines)
+    else:
+        # For single domain, just use the first text
+        print(monitoring_lines)
+        monitoring_text = monitoring_lines[0] if monitoring_lines else "No monitoring data available"
+    
+    # Prepare the full message
+    if target_type == 'server':
+        header = f"📊 Monitoring Results for Server: {target_name}"
+    else:
+        header = f"📊 Monitoring Results for Domain: {target_name}"
+    
+    status_emoji = "✅" if all_pass else "⚠️"
+    
+    full_message = (
+        f"{header}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Sites: {len(sites_data)} | Jobs: {total_jobs} | Duration: {duration:.1f}s\n"
+        f"Overall Status: {status_emoji} {'PASS' if all_pass else 'FAIL'}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"| Site Name | Status | SSIM | Score | Change \n"
+        f"| --- | --- | --- | --- | --- \n"
+        f"{monitoring_text}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━"
+    )
+    
+    # Send notification
+    try:
+        Notify.send(
+            title=f"Monitoring Complete: {target_name}",
+            body=full_message
+        )
+        print("✅ Monitoring results notification sent")
+    except Exception as e:
+        print(f"❌ Failed to send notification: {e}")
+        print(full_message)  # Fallback to print
+
+
+# Alternative version with compact text
+def wait_for_completion_and_notify_compact(target, sites_data, start_time):
+    """Wait for all jobs to complete, then send compact monitoring results"""
+    from rq.job import Job
+    from django_rq import get_queue
+    from datetime import datetime
+    import time
+    from apps.monitoring.util.evaluator import SiteEvaluator
+    
+    queue = get_queue('default')
+    connection = queue.connection
+    
+    # Collect all job IDs
+    all_job_ids = []
+    for site in sites_data:
+        for job_type, job_id in site['jobs'].items():
+            all_job_ids.append(job_id)
+    
+    total_jobs = len(all_job_ids)
+    print(f"⏳ Waiting for {total_jobs} jobs to complete...")
+    
+    # Wait for all jobs to complete
+    max_wait = 300
+    waited = 0
+    completed_jobs = 0
+    
+    while waited < max_wait and completed_jobs < total_jobs:
+        completed_jobs = 0
+        for job_id in all_job_ids:
+            try:
+                job = Job.fetch(job_id, connection=connection)
+                status = job.get_status()
+                if status in ['finished', 'failed']:
+                    completed_jobs += 1
+            except:
+                pass
+        
+        if completed_jobs < total_jobs:
+            time.sleep(5)
+            waited += 5
+    
+    end_time = datetime.now()
+    duration = (end_time - datetime.fromisoformat(start_time)).total_seconds()
+    
+    target_name = target.get('name', 'Unknown')
+    target_type = target.get('type', 'target')
+    
+    # Build monitoring results
+    monitoring_lines = []
+    all_pass = True
+    
+    for site_info in sites_data:
+        site_name = site_info['name']
+        evaluator = SiteEvaluator(site_name)
+        
+        if evaluator.is_valid():
+            passed, text = evaluator.get_monitoring_text(compact=True)
+            monitoring_lines.append(text)
+            if not passed:
+                all_pass = False
+        else:
+            monitoring_lines.append(f"| {site_name} | ERROR")
+            all_pass = False
+    
+    # Create a single line for servers (comma-separated)
+    if target_type == 'server':
+        monitoring_text = " | ".join(monitoring_lines)
+    else:
+        monitoring_text = monitoring_lines[0] if monitoring_lines else "No data"
+    
+    status_emoji = "✅" if all_pass else "⚠️"
+    
+    # Compact one-line message for Zulip
+    full_message = (
+        f"{status_emoji} {target_type.upper()} {target_name} | "
+        f"Sites:{len(sites_data)} Jobs:{total_jobs} Dur:{duration:.0f}s | "
+        f"{monitoring_text}"
+    )
+    
+    try:
+        Notify.send(
+            title=f"Monitoring: {target_name}",
+            body=full_message
+        )
+        print("✅ Compact monitoring notification sent")
+    except Exception as e:
+        print(f"❌ Failed to send notification: {e}")
+        print(full_message)

@@ -5,6 +5,8 @@ from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db import close_old_connections
 from playwright.sync_api import sync_playwright
+import apprise
+
 
 def capture_screenshot_for_snapshot(snapshot_id):
     """
@@ -175,3 +177,16 @@ def capture_screenshot_for_snapshot(snapshot_id):
         
         close_old_connections()
         print("🏁 Screenshot capture completed")
+
+
+class Notify:
+    """
+    Abstracts notification and associated setup stuff out of the way
+    """
+
+    apobj = apprise.Apprise()
+    apobj.add(os.getenv('NOTIFICATION_URL', '')) 
+
+    @classmethod
+    def send(cls, title, body):
+        cls.apobj.notify(title=title, body=body)
