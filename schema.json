@@ -1,0 +1,7 @@
+openapi: 3.0.3
+info:
+  title: Monitoring API
+  version: 1.0.0
+  description: API for monitoring websites, snapshots, and comparisons
+paths: {}
+components: {}

@@ -17,7 +17,24 @@ import threading
 import time
 from apps.monitoring.utils import Notify
 from datetime import datetime
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema
+from apps.api.serializers import ServerSerializer
 
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema
+
+@extend_schema(
+    description="Test endpoint",
+    tags=['test'],
+)
+@api_view(['GET'])
+def test_view(request):
+    return Response({'message': 'test'})
 
 def get_client_ip(request):
     """Extract client IP from request"""
@@ -40,7 +57,147 @@ def get_caller_info():
             return 'management'
     return 'unknown'
 
-
+@extend_schema(
+    methods=['GET'],
+    description="List all servers with statistics",
+    summary="List Servers",
+    responses={
+        200: OpenApiResponse(
+            description="Successful response with list of servers",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'servers': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'name': {'type': 'string'},
+                                'description': {'type': 'string'},
+                                'ip_address': {'type': 'string'},
+                                'ip_version': {'type': 'integer', 'nullable': True},
+                                'created_at': {'type': 'string', 'format': 'date-time'},
+                                'stats': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'sites': {'type': 'integer'},
+                                        'snapshots': {'type': 'integer'},
+                                        'comparisons': {'type': 'integer'}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+    },
+    tags=['servers'],
+)
+@extend_schema(
+    methods=['POST'],
+    description="Create a new server. If IP address is not provided, the requester's IP will be used.",
+    summary="Create Server",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'name': {'type': 'string', 'description': 'Server name', 'example': 'Web Server 1'},
+                'description': {'type': 'string', 'description': 'Server description', 'example': 'Main web server'},
+                'ip_address': {'type': 'string', 'description': 'IPv4 address', 'example': '192.168.1.100'},
+            },
+            'required': ['name'],
+        }
+    },
+    responses={
+        201: OpenApiResponse(
+            description="Server created successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'},
+                    'server': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'name': {'type': 'string'},
+                            'description': {'type': 'string'},
+                            'ip_address': {'type': 'string'},
+                            'ip_version': {'type': 'integer'},
+                            'ip_source': {'type': 'string', 'enum': ['payload', 'requester']},
+                            'created_at': {'type': 'string', 'format': 'date-time'},
+                            'stats': {
+                                'type': 'object',
+                                'properties': {
+                                    'sites': {'type': 'integer'},
+                                    'snapshots': {'type': 'integer'},
+                                    'comparisons': {'type': 'integer'}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - missing name or invalid IP"),
+    },
+    examples=[
+        OpenApiExample(
+            'Create Server with IP',
+            value={'name': 'Web Server 1', 'description': 'Main web server', 'ip_address': '192.168.1.100'},
+            request_only=True,
+        ),
+        OpenApiExample(
+            'Create Server without IP (uses requester IP)',
+            value={'name': 'Web Server 1', 'description': 'Main web server'},
+            request_only=True,
+        ),
+    ],
+    tags=['servers'],
+)
+@extend_schema(
+    methods=['DELETE'],
+    description="Delete a server with optional cascade to delete all related sites and snapshots",
+    summary="Delete Server",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'server_id': {'type': 'integer', 'description': 'Server ID', 'example': 1},
+                'cascade': {'type': 'boolean', 'description': 'Delete all related sites and snapshots', 'default': False},
+            },
+            'required': ['server_id'],
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Server deleted successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'},
+                    'deleted': {
+                        'type': 'object',
+                        'properties': {
+                            'server': {'type': 'string'},
+                            'sites': {'type': 'integer'},
+                            'snapshots': {'type': 'integer'},
+                            'comparisons': {'type': 'integer'},
+                        }
+                    }
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - server has sites and cascade=false"),
+        404: OpenApiResponse(description="Server not found"),
+    },
+    tags=['servers'],
+)
+@api_view(['GET', "POST", "DELETE"])
 @ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["GET", "POST", "DELETE"])
@@ -266,8 +423,273 @@ def handle_servers(request):
                 'status': 'error',
                 'message': str(e)
             }, status=500)
-        
 
+
+
+@extend_schema(
+    methods=['GET'],
+    description="Get detailed information about a specific site by domain name",
+    summary="Get Site Details",
+    parameters=[
+        OpenApiParameter(
+            name='name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Site domain name (e.g., example.com)',
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Site details retrieved successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'site': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'name': {'type': 'string'},
+                            'server': {
+                                'type': 'object',
+                                'properties': {
+                                    'id': {'type': 'integer'},
+                                    'name': {'type': 'string'},
+                                    'ip_address': {'type': 'string'},
+                                }
+                            },
+                            'server_ip': {'type': 'string', 'nullable': True},
+                            'resolved_ip': {'type': 'string', 'nullable': True},
+                            'is_active': {'type': 'boolean'},
+                            'created_at': {'type': 'string', 'format': 'date-time'},
+                            'stats': {
+                                'type': 'object',
+                                'properties': {
+                                    'total_snapshots': {'type': 'integer'},
+                                    'total_comparisons': {'type': 'integer'},
+                                    'baseline_snapshot_id': {'type': 'integer', 'nullable': True},
+                                }
+                            },
+                            'snapshots': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'id': {'type': 'integer'},
+                                        'taken_at': {'type': 'string', 'format': 'date-time'},
+                                        'http_status_code': {'type': 'integer'},
+                                        'content_length': {'type': 'integer'},
+                                        'has_screenshot': {'type': 'boolean'},
+                                        'is_baseline': {'type': 'boolean'},
+                                        'screenshot_url': {'type': 'string', 'nullable': True},
+                                    }
+                                }
+                            },
+                            'recent_comparisons': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'id': {'type': 'integer'},
+                                        'created_at': {'type': 'string', 'format': 'date-time'},
+                                        'ssim_score': {'type': 'number'},
+                                        'percent_difference': {'type': 'number'},
+                                        'changed_pixels': {'type': 'integer'},
+                                        'total_pixels': {'type': 'integer'},
+                                        'previous_snapshot_id': {'type': 'integer'},
+                                        'current_snapshot_id': {'type': 'integer'},
+                                        'has_heatmap': {'type': 'boolean'},
+                                        'has_diff': {'type': 'boolean'},
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - missing site name"),
+        404: OpenApiResponse(description="Site not found"),
+    },
+    tags=['sites'],
+)
+@extend_schema(
+    methods=['POST'],
+    description="Create one or more sites. Server can be assigned by name or auto-detected by IP.",
+    summary="Create Site(s)",
+    request={
+        'application/json': {
+            'oneOf': [
+                {
+                    'type': 'object',
+                    'properties': {
+                        'name': {'type': 'string', 'description': 'Single site name', 'example': 'example.com'},
+                    },
+                    'required': ['name'],
+                },
+                {
+                    'type': 'object',
+                    'properties': {
+                        'names': {
+                            'type': 'array',
+                            'items': {'type': 'string'},
+                            'description': 'List of site names',
+                            'example': ['example.com', 'google.com', 'github.com'],
+                        },
+                    },
+                    'required': ['names'],
+                }
+            ],
+            'properties': {
+                'server_name': {'type': 'string', 'description': 'Server name to associate'},
+                'is_active': {'type': 'boolean', 'description': 'Site active status', 'default': True},
+            },
+        }
+    },
+    responses={
+        201: OpenApiResponse(
+            description="Sites created successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'},
+                    'results': {
+                        'type': 'object',
+                        'properties': {
+                            'created': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'id': {'type': 'integer'},
+                                        'name': {'type': 'string'},
+                                        'snapshot_id': {'type': 'integer'},
+                                        'job_id': {'type': 'string'},
+                                        'server': {'type': 'string', 'nullable': True},
+                                        'server_assigned_by': {'type': 'string', 'enum': ['name', 'ip', 'none']},
+                                    }
+                                }
+                            },
+                            'skipped': {'type': 'array'},
+                            'failed': {'type': 'array'},
+                        }
+                    },
+                    'stats': {
+                        'type': 'object',
+                        'properties': {
+                            'total': {'type': 'integer'},
+                            'created': {'type': 'integer'},
+                            'skipped': {'type': 'integer'},
+                            'failed': {'type': 'integer'},
+                        }
+                    },
+                    'warning': {'type': 'string', 'nullable': True},
+                    'info': {'type': 'string', 'nullable': True},
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request"),
+        404: OpenApiResponse(description="Server not found"),
+    },
+    examples=[
+        OpenApiExample(
+            'Create Single Site',
+            value={'name': 'example.com', 'server_name': 'Web Server 1'},
+            request_only=True,
+        ),
+        OpenApiExample(
+            'Create Multiple Sites',
+            value={'names': ['example.com', 'google.com'], 'server_name': 'Web Server 1'},
+            request_only=True,
+        ),
+    ],
+    tags=['sites'],
+)
+@extend_schema(
+    methods=['PATCH'],
+    description="Update a site's server, active status, or IP configuration",
+    summary="Update Site",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'site_id': {'type': 'integer', 'description': 'Site ID'},
+                'name': {'type': 'string', 'description': 'Site name (alternative to ID)'},
+                'server_name': {'type': 'string', 'description': 'New server name (use null to remove)', 'nullable': True},
+                'is_active': {'type': 'boolean', 'description': 'Update active status'},
+                'server_ip': {'type': 'string', 'description': 'Update server IP'},
+            },
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Site updated successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'},
+                    'site': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'name': {'type': 'string'},
+                            'server': {'type': 'string', 'nullable': True},
+                            'server_id': {'type': 'integer', 'nullable': True},
+                            'server_ip': {'type': 'string', 'nullable': True},
+                            'is_active': {'type': 'boolean'},
+                        }
+                    },
+                    'updates': {'type': 'object'},
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request"),
+        404: OpenApiResponse(description="Site or server not found"),
+    },
+    tags=['sites'],
+)
+@extend_schema(
+    methods=['DELETE'],
+    description="Delete a site with optional cascade to delete all snapshots and comparisons",
+    summary="Delete Site",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'site_id': {'type': 'integer', 'description': 'Site ID'},
+                'name': {'type': 'string', 'description': 'Site name (alternative to ID)'},
+                'cascade': {'type': 'boolean', 'description': 'Delete all snapshots and comparisons', 'default': False},
+            },
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Site deleted successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'},
+                    'deleted': {
+                        'type': 'object',
+                        'properties': {
+                            'site': {'type': 'string'},
+                            'snapshots': {'type': 'integer'},
+                            'comparisons': {'type': 'integer'},
+                        }
+                    },
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - site has snapshots and cascade=false"),
+        404: OpenApiResponse(description="Site not found"),
+    },
+    tags=['sites'],
+)
+@api_view(['GET', "POST", "DELETE", "PATCH"])
 @ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["GET", "POST", "DELETE", "PATCH"])
@@ -727,7 +1149,371 @@ def handle_sites(request):
                 'message': str(e)
             }, status=500)
         
+@extend_schema(
+    description="List all snapshots for a site",
+    parameters=[
+        OpenApiParameter(
+            name='site_name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Site name (domain)',
+            required=True,
+        ),
+        OpenApiParameter(
+            name='limit',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Number of snapshots to return',
+            required=False,
+            default=20,
+        ),
+        OpenApiParameter(
+            name='offset',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Pagination offset',
+            required=False,
+            default=0,
+        ),
+    ],
+    responses={200: dict, 404: dict},
+    tags=['api_list_snapshots'],
+)
 
+
+@extend_schema(
+    description="List all snapshots for a specific site with pagination",
+    summary="List Site Snapshots",
+    parameters=[
+        OpenApiParameter(
+            name='site_name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Site domain name (e.g., example.com)',
+            required=True,
+        ),
+        OpenApiParameter(
+            name='limit',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Number of snapshots to return',
+            required=False,
+            default=20,
+        ),
+        OpenApiParameter(
+            name='offset',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Pagination offset',
+            required=False,
+            default=0,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="List of snapshots retrieved successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'site': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'name': {'type': 'string'},
+                            'baseline_snapshot_id': {'type': 'integer', 'nullable': True},
+                            'baseline_taken_at': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                        }
+                    },
+                    'snapshots': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'taken_at': {'type': 'string', 'format': 'date-time'},
+                                'taken_at_timestamp': {'type': 'number'},
+                                'http_status_code': {'type': 'integer'},
+                                'content_length': {'type': 'integer'},
+                                'has_screenshot': {'type': 'boolean'},
+                                'is_baseline': {'type': 'boolean'},
+                                'screenshot_url': {'type': 'string', 'nullable': True},
+                            }
+                        }
+                    },
+                    'pagination': {
+                        'type': 'object',
+                        'properties': {
+                            'total': {'type': 'integer'},
+                            'limit': {'type': 'integer'},
+                            'offset': {'type': 'integer'},
+                            'returned': {'type': 'integer'},
+                            'has_next': {'type': 'boolean'},
+                        }
+                    },
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - missing site name"),
+        404: OpenApiResponse(description="Site not found"),
+    },
+    tags=['snapshots'],
+)
+@api_view(['GET'])
+@ip_allow(mode='all')
+@csrf_exempt
+@require_http_methods(["GET"])
+def list_snapshots(request, site_name=None):
+    # Your existing code
+    pass
+
+
+@extend_schema(
+    description="Get status of a specific snapshot",
+    parameters=[
+        OpenApiParameter(
+            name='snapshot_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='Snapshot ID',
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(description="Snapshot status retrieved"),
+        404: OpenApiResponse(description="Snapshot not found"),
+    },
+    tags=['snapshots'],
+)
+@api_view(['GET'])
+@ip_allow(mode='all')
+@csrf_exempt
+@require_http_methods(["GET"])
+def get_snapshot_status(request, snapshot_id):
+    # Your existing code
+    pass
+
+
+@extend_schema(
+    methods=['GET'],
+    description="List all snapshots for a specific site with pagination",
+    summary="List Site Snapshots",
+    parameters=[
+        OpenApiParameter(
+            name='site_name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Site domain name (e.g., example.com)',
+            required=True,
+        ),
+        OpenApiParameter(
+            name='limit',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Number of snapshots to return',
+            required=False,
+            default=20,
+        ),
+        OpenApiParameter(
+            name='offset',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Pagination offset',
+            required=False,
+            default=0,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="List of snapshots retrieved successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'site': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'name': {'type': 'string'},
+                            'baseline_snapshot_id': {'type': 'integer', 'nullable': True},
+                            'baseline_taken_at': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                        }
+                    },
+                    'snapshots': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'taken_at': {'type': 'string', 'format': 'date-time'},
+                                'taken_at_timestamp': {'type': 'number'},
+                                'http_status_code': {'type': 'integer'},
+                                'content_length': {'type': 'integer'},
+                                'has_screenshot': {'type': 'boolean'},
+                                'is_baseline': {'type': 'boolean'},
+                                'screenshot_url': {'type': 'string', 'nullable': True},
+                            }
+                        }
+                    },
+                    'pagination': {
+                        'type': 'object',
+                        'properties': {
+                            'total': {'type': 'integer'},
+                            'limit': {'type': 'integer'},
+                            'offset': {'type': 'integer'},
+                            'returned': {'type': 'integer'},
+                            'has_next': {'type': 'boolean'},
+                        }
+                    },
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - missing site name"),
+        404: OpenApiResponse(description="Site not found"),
+    },
+    tags=['snapshots'],
+)
+
+
+@extend_schema(
+    methods=['GET'],
+    description="Get detailed status of a specific snapshot by ID",
+    summary="Get Snapshot Status",
+    parameters=[
+        OpenApiParameter(
+            name='snapshot_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='Snapshot ID',
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Snapshot status retrieved successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'snapshot': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'site': {'type': 'string'},
+                            'taken_at': {'type': 'string', 'format': 'date-time'},
+                            'http_status_code': {'type': 'integer'},
+                            'content_length': {'type': 'integer'},
+                            'has_screenshot': {'type': 'boolean'},
+                            'is_baseline': {'type': 'boolean'},
+                            'screenshot_url': {'type': 'string', 'nullable': True},
+                        }
+                    },
+                    'comparison': {
+                        'type': 'object',
+                        'nullable': True,
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'ssim_score': {'type': 'number'},
+                            'percent_difference': {'type': 'number'},
+                            'created_at': {'type': 'string', 'format': 'date-time'},
+                            'heatmap_url': {'type': 'string', 'nullable': True},
+                            'diff_url': {'type': 'string', 'nullable': True},
+                        }
+                    },
+                }
+            }
+        ),
+        404: OpenApiResponse(description="Snapshot not found"),
+    },
+    tags=['snapshots'],
+)
+
+
+@extend_schema(
+    methods=['POST'],
+    description="Trigger a new screenshot snapshot for a site. Optionally set it as the new baseline.",
+    summary="Trigger Snapshot",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'name': {'type': 'string', 'description': 'Site name', 'example': 'example.com'},
+                'site_name': {'type': 'string', 'description': 'Site name (alternative)'},
+                'domain': {'type': 'string', 'description': 'Domain name (alternative)'},
+                'set_as_baseline': {'type': 'boolean', 'description': 'Set this snapshot as new baseline', 'default': False},
+            },
+            'required': ['name'],
+        }
+    },
+    responses={
+        202: OpenApiResponse(
+            description="Snapshot triggered successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'},
+                    'snapshot': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'created_at': {'type': 'string', 'format': 'date-time'},
+                            'status': {'type': 'string', 'enum': ['queued']},
+                            'is_baseline': {'type': 'boolean'},
+                        }
+                    },
+                    'jobs': {
+                        'type': 'object',
+                        'properties': {
+                            'screenshot': {
+                                'type': 'object',
+                                'properties': {
+                                    'id': {'type': 'string'},
+                                    'status': {'type': 'string', 'enum': ['queued']},
+                                }
+                            }
+                        }
+                    },
+                    'current_baseline': {
+                        'type': 'object',
+                        'nullable': True,
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'taken_at': {'type': 'string', 'format': 'date-time'},
+                        }
+                    },
+                    'baseline_change': {
+                        'type': 'object',
+                        'nullable': True,
+                        'properties': {
+                            'previous_baseline_id': {'type': 'integer', 'nullable': True},
+                            'previous_baseline_taken_at': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                            'new_baseline_id': {'type': 'integer'},
+                            'new_baseline_taken_at': {'type': 'string', 'format': 'date-time'},
+                        }
+                    },
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - missing site name or inactive site"),
+        404: OpenApiResponse(description="Site not found"),
+    },
+    examples=[
+        OpenApiExample(
+            'Trigger Regular Snapshot',
+            value={'name': 'example.com'},
+            request_only=True,
+        ),
+        OpenApiExample(
+            'Trigger Baseline Snapshot',
+            value={'name': 'example.com', 'set_as_baseline': True},
+            request_only=True,
+        ),
+    ],
+    tags=['snapshots'],
+)
+
+@api_view(['POST', 'GET'])
 @ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -925,10 +1711,40 @@ def get_snapshot_status(request, snapshot_id):
             'message': str(e)
         }, status=500)
 
-
+@extend_schema(
+    description="List all snapshots for a site",
+    parameters=[
+        OpenApiParameter(
+            name='site_name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Site name (domain)',
+            required=True,
+        ),
+        OpenApiParameter(
+            name='limit',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Number of snapshots to return',
+            required=False,
+            default=20,
+        ),
+        OpenApiParameter(
+            name='offset',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Pagination offset',
+            required=False,
+            default=0,
+        ),
+    ],
+    responses={200: dict, 404: dict},
+    tags=['api_list_snapshots'],
+)
 @ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["GET"])
+@api_view(['GET'])
 def list_snapshots(request, site_name=None):
     """
     API endpoint to list all snapshots for a site
@@ -1001,6 +1817,61 @@ def list_snapshots(request, site_name=None):
         }
     })
 
+@extend_schema(
+    methods=['POST'],
+    description="Dispatch complete monitoring for a server (all sites) or a specific domain. Runs snapshot, comparison, and site score for each site.",
+    summary="Dispatch Complete Monitoring",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'server': {'type': 'string', 'description': 'Server name to monitor all sites', 'example': 'Web Server 1'},
+                'domain': {'type': 'string', 'description': 'Specific domain to monitor', 'example': 'example.com'},
+                'site': {'type': 'string', 'description': 'Alternative for domain'},
+                'name': {'type': 'string', 'description': 'Alternative for domain'},
+            },
+        }
+    },
+    responses={
+        202: OpenApiResponse(
+            description="Monitoring dispatched",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'},
+                    'target': {
+                        'type': 'object',
+                        'properties': {
+                            'type': {'type': 'string', 'enum': ['server', 'domain']},
+                            'name': {'type': 'string'},
+                            'id': {'type': 'integer'},
+                            'site_count': {'type': 'integer', 'nullable': True},
+                        }
+                    },
+                    'notification': {'type': 'string'},
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - missing server or domain"),
+        404: OpenApiResponse(description="Server or domain not found"),
+    },
+    examples=[
+        OpenApiExample(
+            'Monitor Server',
+            value={'server': 'Web Server 1'},
+            request_only=True,
+        ),
+        OpenApiExample(
+            'Monitor Domain',
+            value={'domain': 'example.com'},
+            request_only=True,
+        ),
+    ],
+    tags=['monitoring'],
+)
+@api_view(['POST'])
+@ip_allow(mode='all')
 @csrf_exempt
 @require_http_methods(["POST"])
 def dispatch_comparison(request):
@@ -1350,3 +2221,16 @@ def wait_for_completion_and_notify_compact(target, sites_data, start_time):
     except Exception as e:
         print(f"❌ Failed to send notification: {e}")
         print(full_message)
+
+
+# from rest_framework.decorators import api_view
+# from rest_framework.response import Response
+# from drf_spectacular.utils import extend_schema
+
+# @extend_schema(
+#     description="Test endpoint",
+#     tags=['test'],
+# )
+# @api_view(['GET'])
+# def test_view(request):
+#     return Response({'message': 'test'})

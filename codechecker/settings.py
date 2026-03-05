@@ -46,17 +46,24 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django_rq',
     "rest_framework",
+    "drf_spectacular",
     "apps.accounts",
     "apps.api",
     "apps.core",
     "apps.monitoring.apps.MonitoringConfig",
     "apps.infrastructure",
     "django_cleanup",
-    "drf_spectacular",
+    
 ]
 
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+    ],
 }
 
 SPECTACULAR_SETTINGS = {
@@ -68,7 +75,6 @@ SPECTACULAR_SETTINGS = {
     'SWAGGER_UI_SETTINGS': {
         'deepLinking': True,
         'persistAuthorization': True,
-        'displayOperationId': True,
     },
 }
 
