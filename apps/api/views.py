@@ -724,8 +724,9 @@ def handle_sites(request):
 def trigger_snapshot(request):
     """
     API endpoint to trigger a new snapshot for a site
-    POST: {"name": "example.com"} 
+    POST: {"name": "example.com"} or {"name": "example.com", "set_as_baseline": true}
     Creates a new snapshot, enqueues screenshot capture, and automatically queues comparison
+    If set_as_baseline is true, this snapshot becomes the new baseline (old baseline is unset)
     """
     try:
         # Parse JSON data
@@ -743,6 +744,11 @@ def trigger_snapshot(request):
                 'message': 'Site name is required (use "name": "example.com")'
             }, status=400)
         
+        # Check if this snapshot should become the new baseline
+        set_as_baseline = data.get('set_as_baseline', False)
+        if isinstance(set_as_baseline, str):
+            set_as_baseline = set_as_baseline.lower() in ['true', '1', 'yes', 'on']
+        
         # Find the site
         try:
             site = Site.objects.get(name=site_name.lower().strip())
@@ -759,19 +765,35 @@ def trigger_snapshot(request):
                 'message': f'Site "{site_name}" is inactive'
             }, status=400)
         
-        # Get baseline snapshot for reference
-        baseline = site.snapshots.filter(is_baseline=True).first()
+        # Get current baseline snapshot for reference
+        current_baseline = site.snapshots.filter(is_baseline=True).first()
         
         # Create new snapshot
         with transaction.atomic():
-            snapshot = SiteSnapshot.objects.create(
-                site=site,
-                http_status_code=0,  # Temporary value, will be updated by task
-                content_length=0      # Temporary value, will be updated by task
-                # is_baseline is NOT set - only the first snapshot is baseline
-            )
+            # If setting as baseline, we need to unset any existing baseline
+            if set_as_baseline:
+                # Unset all existing baselines for this site
+                site.snapshots.filter(is_baseline=True).update(is_baseline=False)
+                
+                # Create new snapshot as baseline
+                snapshot = SiteSnapshot.objects.create(
+                    site=site,
+                    http_status_code=0,
+                    content_length=0,
+                    is_baseline=True
+                )
+                baseline_message = " and set as new baseline"
+            else:
+                # Create normal snapshot (not baseline)
+                snapshot = SiteSnapshot.objects.create(
+                    site=site,
+                    http_status_code=0,
+                    content_length=0
+                    # is_baseline is NOT set - only the first snapshot is baseline by default
+                )
+                baseline_message = ""
             
-            print(f"✅ Created new snapshot ID: {snapshot.id} for {site.name}")
+            print(f"✅ Created new snapshot ID: {snapshot.id} for {site.name}{baseline_message}")
             
             # Get the queue
             queue = get_queue('default')
@@ -785,17 +807,15 @@ def trigger_snapshot(request):
             )
             
             print(f"🚀 Enqueued screenshot job: {screenshot_job.id}")
-            
-            # Note: The comparison will be automatically triggered by the 
-            # create_comparison_task inside capture_screenshot_task after screenshot is saved
         
         response_data = {
             'status': 'success',
-            'message': f'Snapshot triggered for "{site.name}"',
+            'message': f'Snapshot triggered for "{site.name}"{baseline_message}',
             'snapshot': {
                 'id': snapshot.id,
                 'created_at': snapshot.taken_at.isoformat(),
-                'status': 'queued'
+                'status': 'queued',
+                'is_baseline': snapshot.is_baseline
             },
             'jobs': {
                 'screenshot': {
@@ -805,12 +825,21 @@ def trigger_snapshot(request):
             }
         }
         
-        # Add baseline info if available
-        if baseline:
-            response_data['baseline'] = {
-                'id': baseline.id,
-                'taken_at': baseline.taken_at.isoformat()
+        # Add baseline info
+        if set_as_baseline:
+            response_data['baseline_change'] = {
+                'previous_baseline_id': current_baseline.id if current_baseline else None,
+                'previous_baseline_taken_at': current_baseline.taken_at.isoformat() if current_baseline else None,
+                'new_baseline_id': snapshot.id,
+                'new_baseline_taken_at': snapshot.taken_at.isoformat()
             }
+        else:
+            # Add current baseline info for reference
+            if current_baseline:
+                response_data['current_baseline'] = {
+                    'id': current_baseline.id,
+                    'taken_at': current_baseline.taken_at.isoformat()
+                }
         
         return JsonResponse(response_data, status=202)  # 202 Accepted
         
