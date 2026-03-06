@@ -17,15 +17,16 @@ NC='\033[0m' # No Color
 usage() {
     echo "Usage: $0 [OPTION] [ARGUMENT]"
     echo "Options:"
-    echo "  --add-server              Add server using hostname"
-    echo "  --add-server-domains       Add server domains using hostname"
-    echo "  --add-domain DOMAIN       Add specific domain"
-    echo "  --add-all-domains         Add all domains from Plesk"
-    echo "  --make-snapshot DOMAIN    Create snapshot for specific domain"
-    echo "  --make-all-snapshots       Create snapshots for all domains"
-    echo "  --report DOMAIN           Generate report for specific domain"
-    echo "  --report-all              Generate server report"
-    echo "  --help                    Show this help message"
+    echo "  --add-server                       Add server using hostname"
+    echo "  --add-domain DOMAIN                Add specific domain"
+    echo "  --add-all-domains                  Add all domains from Plesk"
+    echo "  --make-snapshot DOMAIN             Create snapshot for specific domain"
+    echo "  --make-baseline-snapshot DOMAIN    Create snapshot for specific domain and set as baseline"
+    echo "  --make-all-snapshots               Create snapshots for all domains"
+    echo "  --make-all-baseline-snapshots      Create snapshots for all domains and set as baseline"
+    echo "  --report DOMAIN                    Generate report for specific domain"
+    echo "  --report-all                       Generate server report"
+    echo "  --help                             Show this help message"
 }
 
 # Function to check if curl is available
@@ -62,14 +63,7 @@ main() {
             echo ""
             ;;
             
-        --add-server-domains)
-            echo -e "${BLUE}Adding server domains: $HOSTNAME${NC}"
-            curl -X POST "${BASE_URL}/dispatch_comparison/" \
-                -H "Content-Type: application/json" \
-                -d "{\"server\": \"$HOSTNAME\"}"
-            echo ""
-            ;;
-            
+                    
         --add-domain)
             if [ -z "$2" ]; then
                 echo -e "${RED}Error: Domain name required${NC}"
@@ -110,6 +104,19 @@ main() {
                 -d "{\"name\":\"$2\"}"
             echo ""
             ;;
+
+        --make-baseline-snapshot)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Domain name required${NC}"
+                usage
+                exit 1
+            fi
+            echo -e "${BLUE}Creating snapshot for domain: $2${NC}"
+            curl -X POST "${BASE_URL}/snapshots/" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"$2\", \"set_as_baseline\": \"true\"}"
+            echo ""
+            ;;
             
         --make-all-snapshots)
             check_plesk
@@ -125,7 +132,22 @@ main() {
             done
             echo -e "${GREEN}All snapshots created${NC}"
             ;;
-            
+        
+        --make-all-baseline-snapshots)
+            check_plesk
+            echo -e "${BLUE}Creating snapshots for all domains...${NC}"
+            plesk bin domain --list | while read domain; do
+                if [ ! -z "$domain" ]; then
+                    echo -e "${YELLOW}Creating snapshot for domain: $domain${NC}"
+                    curl -X POST "${BASE_URL}/snapshots/" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"name\":\"$domain\", \"set_as_baseline\": \"true\"}"
+                    echo ""
+                fi
+            done
+            echo -e "${GREEN}All snapshots created${NC}"
+            ;;
+
         --report)
             if [ -z "$2" ]; then
                 echo -e "${RED}Error: Domain name required${NC}"
