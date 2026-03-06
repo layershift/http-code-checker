@@ -13,7 +13,7 @@ class SiteScoringService:
         self.http_url = f'http://{url}' if not url.startswith(('http://', 'https://')) else url
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (compatible; SiteMonitor/1.0)'
+            'User-Agent': 'Mozilla/5.0 (compatible; monitoring360bot/1.1; +https://app.360monitoring.com/bot.html)'
         })
         self.metrics = {}
         

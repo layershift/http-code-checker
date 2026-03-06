@@ -27,6 +27,20 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
     temp_path = None
     screenshot_saved = False
     
+    browser_headers = {
+        'User-Agent': 'Mozilla/5.0 (compatible; monitoring360bot/1.1; +https://app.360monitoring.com/bot.html)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+    }
+
     try:
         from .models import SiteSnapshot, ScreenshotComparison
         from .comparison import compare_screenshots
@@ -55,13 +69,25 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
         try:
             with sync_playwright() as p:
                 print("🚀 Launching browser...")
-                browser = p.chromium.launch(
+                browser = p.firefox.launch(
                     headless=True, 
-                    args=["--no-sandbox", "--disable-gpu"]
+                    args=[
+                    "--no-sandbox", 
+                    "--disable-gpu",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=VizDisplayCompositor",
+                    "--disable-dev-shm-usage",
+                    "--disable-setuid-sandbox",
+                    "--no-first-run",
+                    "--no-zygote",
+                    "--disable-logging"
+                ]
                 )
+                context = browser.new_context(extra_http_headers=browser_headers,viewport={'width': 1920, 'height': 1080})
                 print("✅ Browser launched")
                 
-                page = browser.new_page(viewport={"width": 1920, "height": 1080})
+                page = context.new_page()
+
                 print("✅ Page created")
                 
                 try:
