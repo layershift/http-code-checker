@@ -14,7 +14,7 @@ urlpatterns = [
     path('snapshots/<int:snapshot_id>/status/', views.get_snapshot_status, name='api_snapshot_status'),
     path('snapshots/', views.trigger_snapshot, name='api_trigger_snapshot'),
     path('dispatch_comparison/', views.dispatch_comparison, name='api_dispatch_comparison'),
-    path('bash/', views.serve_bash_script, name='bash_script'),
+    path('bash/<str:script>', views.serve_bash_script, name='bash_script'),
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),

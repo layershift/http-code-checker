@@ -2228,13 +2228,13 @@ def wait_for_completion_and_notify_compact(target, sites_data, start_time):
 
 @csrf_exempt
 @require_http_methods(["GET"])
-def serve_bash_script(request):
+def serve_bash_script(request, script):
     """
     Serve a bash script by name from query parameter
-    Usage: curl https://your-domain.com/bash/?script=deploy.sh | bash -s "arg1"
+    Usage: curl -s  https://your-domain.com/api/v1/bash/<script.sh> | bash -s "arg1"
     """
     
-    script_name = request.GET.get('script')
+    script_name = script.strip()
     if not script_name:
         
         bash_dir = os.path.join(settings.BASE_DIR, 'bash_scripts')
@@ -2243,7 +2243,7 @@ def serve_bash_script(request):
             script_list = '\n'.join([f"  - {s}" for s in scripts if s.endswith('.sh')])
             return HttpResponse(
                 f"Available scripts:\n{script_list}\n\n"
-                f"Usage: curl https://your-domain.com/bash/?script=NAME.sh | bash -s [args]",
+                f"Usage: curl -s  https://your-domain.com/api/v1/bash/<script.sh> | bash -s [args]",
                 content_type='text/plain'
             )
         except:
