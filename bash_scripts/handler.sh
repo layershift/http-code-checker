@@ -18,6 +18,7 @@ usage() {
     echo "Usage: $0 [OPTION] [ARGUMENT]"
     echo "Options:"
     echo "  --add-server              Add server using hostname"
+    echo "  --add-server-domains       Add server domains using hostname"
     echo "  --add-domain DOMAIN       Add specific domain"
     echo "  --add-all-domains         Add all domains from Plesk"
     echo "  --make-snapshot DOMAIN    Create snapshot for specific domain"
@@ -55,6 +56,14 @@ main() {
     case "$1" in
         --add-server)
             echo -e "${BLUE}Adding server: $HOSTNAME${NC}"
+            curl -X POST "${BASE_URL}/servers/" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\": \"$HOSTNAME\", \"description\": \"$HOSTNAME\"}"
+            echo ""
+            ;;
+            
+        --add-server-domains)
+            echo -e "${BLUE}Adding server domains: $HOSTNAME${NC}"
             curl -X POST "${BASE_URL}/dispatch_comparison/" \
                 -H "Content-Type: application/json" \
                 -d "{\"server\": \"$HOSTNAME\"}"

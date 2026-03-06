@@ -291,6 +291,15 @@ def handle_servers(request):
                 }, status=400)
             
             # Create server
+            server_ = Server.objects.filter(name=data['name']).first()
+            print(server_)
+            if server_:
+                return JsonResponse({
+                'status': 'fail',
+                'message': f'Server "{server_.name}" already exist',
+                
+            }, status=201)
+            
             server = Server.objects.create(
                 name=data['name'],
                 description=data.get('description', ''),
