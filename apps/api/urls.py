@@ -7,7 +7,7 @@ urlpatterns = [
     # path('schema/', SpectacularAPIView.as_view(), name='schema'),
     # path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     # path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
-    path('test/', views.test_view, name='test'),
+    # path('test/', views.test_view, name='test'),
     path("servers/", views.handle_servers, name="servers"),
     path("sites/", views.handle_sites, name="sites"),
     path('snapshots/<str:site_name>/', views.list_snapshots, name='api_list_snapshots'),

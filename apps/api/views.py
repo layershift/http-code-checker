@@ -31,13 +31,6 @@ from django.http import HttpResponse, HttpResponseNotFound
 from django.conf import settings
 
 
-@extend_schema(
-    description="Test endpoint",
-    tags=['test'],
-)
-@api_view(['GET'])
-def test_view(request):
-    return Response({'message': 'test'})
 
 def get_client_ip(request):
     """Extract client IP from request"""
