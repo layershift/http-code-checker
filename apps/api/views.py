@@ -23,10 +23,13 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 from apps.api.serializers import ServerSerializer
-
+import os
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
+from django.http import HttpResponse, HttpResponseNotFound
+from django.conf import settings
+
 
 @extend_schema(
     description="Test endpoint",
@@ -2223,14 +2226,49 @@ def wait_for_completion_and_notify_compact(target, sites_data, start_time):
         print(full_message)
 
 
-# from rest_framework.decorators import api_view
-# from rest_framework.response import Response
-# from drf_spectacular.utils import extend_schema
-
-# @extend_schema(
-#     description="Test endpoint",
-#     tags=['test'],
-# )
-# @api_view(['GET'])
-# def test_view(request):
-#     return Response({'message': 'test'})
+@csrf_exempt
+@require_http_methods(["GET"])
+def serve_bash_script(request):
+    """
+    Serve a bash script by name from query parameter
+    Usage: curl https://your-domain.com/bash/?script=deploy.sh | bash -s "arg1"
+    """
+    
+    script_name = request.GET.get('script')
+    if not script_name:
+        
+        bash_dir = os.path.join(settings.BASE_DIR, 'bash_scripts')
+        try:
+            scripts = os.listdir(bash_dir)
+            script_list = '\n'.join([f"  - {s}" for s in scripts if s.endswith('.sh')])
+            return HttpResponse(
+                f"Available scripts:\n{script_list}\n\n"
+                f"Usage: curl https://your-domain.com/bash/?script=NAME.sh | bash -s [args]",
+                content_type='text/plain'
+            )
+        except:
+            return HttpResponse("No scripts available", status=404)
+    
+    # Security: Prevent directory traversal
+    if '..' in script_name or script_name.startswith('/'):
+        return HttpResponseNotFound("Invalid script name")
+    
+    
+    bash_dir = os.path.join(settings.BASE_DIR, 'bash_scripts')
+    file_path = os.path.join(bash_dir, script_name)
+    
+    # Check if file exists and is within the bash_scripts directory
+    if not os.path.exists(file_path) or not os.path.realpath(file_path).startswith(os.path.realpath(bash_dir)):
+        return HttpResponseNotFound("Script not found")
+    
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+        
+        # Return as plain text for piping to bash
+        response = HttpResponse(content, content_type='text/plain')
+        response['Content-Disposition'] = f'inline; filename="{script_name}"'
+        return response
+        
+    except Exception as e:
+        return HttpResponse(f"Error reading file: {e}", status=500)
