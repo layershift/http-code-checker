@@ -2104,7 +2104,11 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     else:
         # For single domain, just use the first text
         print(monitoring_lines)
-        monitoring_text = monitoring_lines[0] if monitoring_lines else "No monitoring data available"
+        if len (monitoring_lines) == 0:
+            print("Everything is ok")
+            monitoring_text = f"| {target_name} | ✅ | ✅ | ✅ | ✅"
+        else:
+            monitoring_text = monitoring_lines[0] if monitoring_lines else "No monitoring data available"
     
     # Prepare the full message
     if target_type == 'server':
