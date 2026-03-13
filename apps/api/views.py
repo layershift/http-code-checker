@@ -1866,13 +1866,20 @@ def dispatch_comparison(request):
     Runs: snapshot + comparison + site score
     Returns: "Success" via Notify.send() when all jobs complete
     """
+    print(f"📡 Received monitoring dispatch request: ")
+    if request.method == 'POST' and not hasattr(request, '_body'):
+        request.data
+    print(f"📡 Received monitoring dispatch request: {request.data}")
     try:
         # Parse JSON data
-        if request.content_type == 'application/json':
-            data = json.loads(request.body)
+        print(f"📡 Received monitoring dispatch request: {type(request.data)} ")
+
+        if request.content_type == 'application/json' and type(request.data) == bytes:
+            data = json.loads(request.data)
         else:
-            data = request.POST.dict()
+            data = request.data
         
+        print(f"📡 Received monitoring dispatch request: {data} xxx")
         server_name = data.get('server')
         domain_name = data.get('domain') or data.get('site') or data.get('name')
         
@@ -1887,7 +1894,7 @@ def dispatch_comparison(request):
             'sites': [],
             'start_time': datetime.now().isoformat()
         }
-        
+        print(f"🚀 Dispatching monitoring for server: {server_name}, domain: {domain_name}")
         queue = get_queue('default')
         
         # CASE 1: Monitor a specific domain
@@ -1965,6 +1972,7 @@ def dispatch_comparison(request):
             'message': 'Invalid JSON data'
         }, status=400)
     except Exception as e:
+        print(f"Error in dispatch_comparison: {e}")
         return JsonResponse({
             'status': 'error',
             'message': str(e)

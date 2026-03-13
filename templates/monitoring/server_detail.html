@@ -13,6 +13,11 @@
                 <p class="text-gray-600">Created: {{ server.created_at|date:"F j, Y" }}</p>
             </div>
             <div class="flex space-x-2">
+                <!-- Generate Report Button -->
+                <button onclick="generateServerReport()" 
+                        class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition">
+                    <i class="fas fa-chart-bar mr-2"></i>Generate Server Report
+                </button>
                 <a href="{% url 'server_list' %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">
                     <i class="fas fa-arrow-left mr-2"></i>Back to Servers
                 </a>
@@ -256,4 +261,64 @@
         </div>
     </div>
 </div>
+
+<!-- JavaScript for report button -->
+<script>
+// Function to get CSRF token from cookies
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+const csrftoken = getCookie('csrftoken');
+
+function generateServerReport() {
+    if (confirm('Generate comprehensive report for server: {{ server.name }}?')) {
+        // Show loading state
+        const button = event.target;
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
+        button.disabled = true;
+
+        // Make the API call - exactly matching your bash script
+        fetch('/api/v1/dispatch_comparison/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify({
+                server: '{{ server.name }}'  // Server name in JSON payload
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success' || data.status === 'accepted') {
+                alert(`✅ Report generation started!\n\nSites: ${data.target?.site_count || 'N/A'}\nNotification: ${data.notification || 'Results will be sent when complete.'}`);
+            } else {
+                alert('❌ Error: ' + (data.message || 'Unknown error occurred'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('❌ Error: ' + error);
+        })
+        .finally(() => {
+            // Restore button
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+    }
+}
+</script>
 {% endblock %}
