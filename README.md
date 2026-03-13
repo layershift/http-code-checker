@@ -41,11 +41,38 @@ uv run  manage.py runserver 0.0.0.0:8000
 
 ### As a service
 
+#### Rq workers
+
+##### Create systemd file 
 ```
-Service files will go here once we have more
+cat "/etc/systemd/system/rq@.service"
+[Unit]
+Description=RQ Worker Number %i
+After=multi-user.target
+
+[Service]
+User=httpcodechecker
+Group=httpcodechecker
+WorkingDirectory=/home/httpcodechecker/http-code-checker
+ExecStart = /home/httpcodechecker/.local/bin/uv run /home/httpcodechecker/http-code-checker/manage.py rqworker high default low monitoring --with-scheduler
+Restart = always
+Type = simple
+
+[Install]
+WantedBy=multi-user.target
 ```
 
+##### Reload sysctl and enable services
+```
+systemctl daemon-reload
+systemctl  enable rq@1.service --now
+systemctl  enable rq@2.service --now
+```
+#### Server
 
+```
+sssss
+```
 ## Add/remove domains/servers/triggers
 
 From the server that needs monitoring:
