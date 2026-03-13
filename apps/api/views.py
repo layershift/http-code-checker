@@ -2258,3 +2258,31 @@ def serve_bash_script(request, script):
         
     except Exception as e:
         return HttpResponse(f"Error reading file: {e}", status=500)
+
+
+@api_view(['POST'])
+@ip_allow(mode='all')
+def set_snapshot_baseline(request, snapshot_id):
+    """
+    Set an existing snapshot as the baseline
+    """
+    try:
+        from apps.monitoring.models import SiteSnapshot
+        
+        snapshot = SiteSnapshot.objects.get(id=snapshot_id)
+        
+        # This will automatically unset any other baseline for this site
+        # due to the model's save() method
+        snapshot.is_baseline = True
+        snapshot.save()
+        
+        return Response({
+            'status': 'success',
+            'message': f'Snapshot {snapshot_id} set as baseline'
+        })
+        
+    except SiteSnapshot.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': f'Snapshot {snapshot_id} not found'
+        }, status=404)
