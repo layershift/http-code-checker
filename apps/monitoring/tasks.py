@@ -87,7 +87,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                 )
                 # Create context with viewport and device scale factor
                 context = browser.new_context(
-                    viewport={'width': 1920, 'height': 1080},
+                    viewport={'width': 1024, 'height': 768},
                     device_scale_factor=1
                 )
                 print("✅ Browser launched")
