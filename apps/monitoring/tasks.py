@@ -28,7 +28,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
     screenshot_saved = False
     
     browser_headers = {
-        'User-Agent': 'Mozilla/5.0 (compatible; Layershift/StatusChecker)',
+        'User-Agent': 'Chrome/145.0.0.0 (compatible; Layershift/StatusChecker)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
         'Accept-Encoding': 'gzip, deflate, br',
@@ -69,7 +69,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
         try:
             with sync_playwright() as p:
                 print("🚀 Launching browser...")
-                browser = p.firefox.launch(
+                browser = p.chromium.launch(
                     headless=True, 
                     args=[
                     "--no-sandbox", 
@@ -83,7 +83,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                     "--disable-logging"
                 ]
                 )
-                context = browser.new_context(extra_http_headers=browser_headers,viewport={'width': 1920, 'height': 1080})
+                context = browser.new_context(extra_http_headers=browser_headers,viewport={'width': 1920, 'height': 1080},device_scale_factor=1)
                 print("✅ Browser launched")
                 
                 page = context.new_page()
@@ -97,7 +97,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                     print(f"✅ Got status code: {status_code}")
                     
                     print("📸 Taking screenshot...")
-                    page.screenshot(path=temp_path, full_page=True)
+                    page.screenshot(path=temp_path, full_page=True,type='png',omit_background=False, animations='disabled')
                     print(f"✅ Screenshot saved to {temp_path}")
                     
                     print("📊 Getting page content...")
