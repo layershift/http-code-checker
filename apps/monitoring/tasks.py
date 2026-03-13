@@ -77,6 +77,8 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                         "--disable-blink-features=AutomationControlled",
                         "--disable-features=VizDisplayCompositor",
                         "--disable-dev-shm-usage",
+                        "--single-process",
+                        "--js-flags=--max-old-space-size=512",
                         "--disable-setuid-sandbox",
                         "--no-first-run",
                         "--no-zygote",
