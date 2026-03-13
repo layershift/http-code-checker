@@ -2040,7 +2040,7 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     print(f"⏳ Waiting for {total_jobs} jobs to complete...")
     
     # Wait for all jobs to complete
-    max_wait = 1800  # 30 minutes max
+    max_wait = 3600  # 60 minutes max
     waited = 0
     completed_jobs = 0
     
