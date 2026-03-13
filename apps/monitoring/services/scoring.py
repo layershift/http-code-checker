@@ -13,7 +13,7 @@ class SiteScoringService:
         self.http_url = f'http://{url}' if not url.startswith(('http://', 'https://')) else url
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (compatible; Layershift/StatusChecker)'
+            'User-Agent': 'python-requests/2.20.0 (compatible; Layershift/StatusChecker)'
         })
         self.metrics = {}
         

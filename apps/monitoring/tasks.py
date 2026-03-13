@@ -72,23 +72,54 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                 browser = p.chromium.launch(
                     headless=True, 
                     args=[
-                    "--no-sandbox", 
-                    "--disable-gpu",
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-features=VizDisplayCompositor",
-                    "--disable-dev-shm-usage",
-                    "--disable-setuid-sandbox",
-                    "--no-first-run",
-                    "--no-zygote",
-                    "--disable-logging"
-                ]
+                        "--no-sandbox", 
+                        "--disable-gpu",
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-features=VizDisplayCompositor",
+                        "--disable-dev-shm-usage",
+                        "--disable-setuid-sandbox",
+                        "--no-first-run",
+                        "--no-zygote",
+                        "--disable-logging"
+                    ]
                 )
-                context = browser.new_context(extra_http_headers=browser_headers,viewport={'width': 1920, 'height': 1080},device_scale_factor=1)
+                # Create context with viewport and device scale factor
+                context = browser.new_context(
+                    viewport={'width': 1920, 'height': 1080},
+                    device_scale_factor=1
+                )
                 print("✅ Browser launched")
                 
                 page = context.new_page()
-
                 print("✅ Page created")
+                
+                # === Intercept requests to apply custom headers (including for redirects) ===
+                def intercept_request(route, request):
+                    """Intercept and modify ALL requests (including redirects)"""
+                    
+                    headers = request.headers
+                    
+                    # Create a new headers dict with our custom headers
+                    modified_headers = {**headers, **browser_headers}
+                    
+                    # Reinject our headers
+                    route.continue_(headers=modified_headers)
+                
+                # Register the interceptor for all requests
+                page.route("**/*", intercept_request)
+                
+                # Add stealth script to hide automation
+                page.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['en-US', 'en']
+                    });
+                """)
                 
                 try:
                     print(f"⏳ Navigating to {url}...")
@@ -97,7 +128,13 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                     print(f"✅ Got status code: {status_code}")
                     
                     print("📸 Taking screenshot...")
-                    page.screenshot(path=temp_path, full_page=True,type='png',omit_background=False, animations='disabled')
+                    page.screenshot(
+                        path=temp_path, 
+                        full_page=True,
+                        type='png',
+                        omit_background=False, 
+                        animations='disabled'
+                    )
                     print(f"✅ Screenshot saved to {temp_path}")
                     
                     print("📊 Getting page content...")
