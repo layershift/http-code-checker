@@ -29,6 +29,7 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 from django.http import HttpResponse, HttpResponseNotFound
 from django.conf import settings
+from rest_framework import status
 
 
 
@@ -1521,62 +1522,55 @@ def get_snapshot_status(request, snapshot_id):
 @api_view(['POST', 'GET'])
 @ip_allow(mode='all')
 @csrf_exempt
-@require_http_methods(["POST"])
+@require_http_methods(["POST", "GET"])
 def trigger_snapshot(request):
     """
     API endpoint to trigger a new snapshot for a site
     POST: {"name": "example.com"} or {"name": "example.com", "set_as_baseline": true}
-    Creates a new snapshot, enqueues screenshot capture, and automatically queues comparison
-    If set_as_baseline is true, this snapshot becomes the new baseline (old baseline is unset)
     """
     try:
-        # Parse JSON data
-        if request.content_type == 'application/json':
-            data = json.loads(request.body)
-        else:
-            data = request.POST.dict()
+        # With @api_view, request.data is already parsed - use it directly
+        data = request.data
         
-        # Get site name
         site_name = data.get('name') or data.get('site_name') or data.get('domain')
         
         if not site_name:
-            return JsonResponse({
+            return Response({
                 'status': 'error',
                 'message': 'Site name is required (use "name": "example.com")'
-            }, status=400)
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Check if this snapshot should become the new baseline
         set_as_baseline = data.get('set_as_baseline', False)
-        if isinstance(set_as_baseline, str):
-            set_as_baseline = set_as_baseline.lower() in ['true', '1', 'yes', 'on']
         
         # Find the site
+        from apps.monitoring.models import Site
         try:
             site = Site.objects.get(name=site_name.lower().strip())
         except Site.DoesNotExist:
-            return JsonResponse({
+            return Response({
                 'status': 'error',
                 'message': f'Site "{site_name}" not found'
-            }, status=404)
+            }, status=status.HTTP_404_NOT_FOUND)
         
         # Check if site is active
         if not site.is_active:
-            return JsonResponse({
+            return Response({
                 'status': 'error',
                 'message': f'Site "{site_name}" is inactive'
-            }, status=400)
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         # Get current baseline snapshot for reference
         current_baseline = site.snapshots.filter(is_baseline=True).first()
         
         # Create new snapshot
+        from django.db import transaction
+        from apps.monitoring.models import SiteSnapshot
+        from django_rq import get_queue
+        from apps.monitoring.tasks import capture_screenshot_task
+        
         with transaction.atomic():
-            # If setting as baseline, we need to unset any existing baseline
             if set_as_baseline:
-                # Unset all existing baselines for this site
                 site.snapshots.filter(is_baseline=True).update(is_baseline=False)
-                
-                # Create new snapshot as baseline
                 snapshot = SiteSnapshot.objects.create(
                     site=site,
                     http_status_code=0,
@@ -1585,29 +1579,20 @@ def trigger_snapshot(request):
                 )
                 baseline_message = " and set as new baseline"
             else:
-                # Create normal snapshot (not baseline)
                 snapshot = SiteSnapshot.objects.create(
                     site=site,
                     http_status_code=0,
                     content_length=0
-                    # is_baseline is NOT set - only the first snapshot is baseline by default
                 )
                 baseline_message = ""
             
-            print(f"✅ Created new snapshot ID: {snapshot.id} for {site.name}{baseline_message}")
-            
-            # Get the queue
             queue = get_queue('default')
-            
-            # Enqueue screenshot capture task
             screenshot_job = queue.enqueue(
                 capture_screenshot_task,
                 snapshot.id,
                 site.name,
                 site.id
             )
-            
-            print(f"🚀 Enqueued screenshot job: {screenshot_job.id}")
         
         response_data = {
             'status': 'success',
@@ -1626,7 +1611,6 @@ def trigger_snapshot(request):
             }
         }
         
-        # Add baseline info
         if set_as_baseline:
             response_data['baseline_change'] = {
                 'previous_baseline_id': current_baseline.id if current_baseline else None,
@@ -1635,25 +1619,21 @@ def trigger_snapshot(request):
                 'new_baseline_taken_at': snapshot.taken_at.isoformat()
             }
         else:
-            # Add current baseline info for reference
             if current_baseline:
                 response_data['current_baseline'] = {
                     'id': current_baseline.id,
                     'taken_at': current_baseline.taken_at.isoformat()
                 }
         
-        return JsonResponse(response_data, status=202)  # 202 Accepted
+        return Response(response_data, status=status.HTTP_202_ACCEPTED)
         
-    except json.JSONDecodeError:
-        return JsonResponse({
-            'status': 'error',
-            'message': 'Invalid JSON data'
-        }, status=400)
     except Exception as e:
-        return JsonResponse({
+        import traceback
+        traceback.print_exc()
+        return Response({
             'status': 'error',
             'message': str(e)
-        }, status=500)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @ip_allow(mode='all')
