@@ -179,8 +179,9 @@ class SiteEvaluator:
         Generate a one-line monitoring text for Zulip
         
         Returns a tuple with (bool, text)
-        bool is False if SSIM is fail OR if baseline status differs from latest status
-        text format: "| [site.com](http://.../sites/XX/) | baseline_status→current_status | ssim(ok/warning/fail) | score | change%"
+        bool is False ONLY if there's change in status code:
+        - Status code changed OR
+        - SSIM significantly changed when we have valid screenshots to compare
         """
         if not self.is_valid():
             return (False, f"| [{self.domain}](http://dontdeletezoltan.man-1.solus.stage.town/sites/) | Error: {self.error}")
@@ -192,14 +193,25 @@ class SiteEvaluator:
         latest_snapshot = self.site.snapshots.order_by('-taken_at').first()
         latest_status = latest_snapshot.http_status_code if latest_snapshot else None
         
+        # Define good vs bad status codes
+        def is_good_status(status_code):
+            """Return True if status code is 200-399 (success/redirect)"""
+            return status_code and 200 <= status_code < 400
+        
+        def is_bad_status(status_code):
+            """Return True if status code is 400-599 (client/server error)"""
+            return status_code and 400 <= status_code < 600
+        
         # Get comparison data
         if self.has_comparison():
             comp = self.latest_comparison
             ssim_score = comp.ssim_score
             percent_difference = comp.percent_difference
+            has_valid_comparison = True
         else:
             ssim_score = 0
             percent_difference = 0
+            has_valid_comparison = False
         
         # Get score data
         if self.has_score():
@@ -208,48 +220,52 @@ class SiteEvaluator:
         else:
             overall_score = 0
         
-        # Evaluate SSIM status
-        if ssim_score >= 0.98:
-            ssim_status = "ok"
-            ssim_pass = True
-        elif ssim_score >= 0.90:
-            ssim_status = "warning"
-            ssim_pass = True
-        else:
+        # Evaluate SSIM status - only relevant if we have a valid comparison
+        if has_valid_comparison and ssim_score < 0.90:  # Only consider SSIM if we actually compared
             ssim_status = "fail"
-            ssim_pass = False
+            ssim_regression = True
+        elif has_valid_comparison and ssim_score < 0.98:
+            ssim_status = "warning"
+            ssim_regression = True  # Warning still counts as regression
+        else:
+            ssim_status = "ok"
+            ssim_regression = False
         
-        # Check if status codes match (if both exist)
-        status_match = True
+        # Apply status code logic
+        status_change = False
+        
         if baseline_status is not None and latest_status is not None:
-            status_match = (baseline_status == latest_status)
+            if is_good_status(baseline_status) and is_bad_status(latest_status):
+                # Was good, now bad - this is a REGRESSION
+                status_change = True
+            elif is_bad_status(baseline_status) and is_good_status(latest_status):
+                # Was bad, now good - this is an IMPROVEMENT , but something still off (like previously suspended domain got activated)
+                status_change = True
         
         # Determine overall pass/fail
-        overall_pass = ssim_pass and status_match
+        # FAIL if status code change OR significant SSIM change
+        # CONSISTENTLY BAD (bad→bad) is OK - no regression
+        overall_pass = not (status_change or ssim_regression)
         
         # Format baseline status
         if baseline_status:
-            if baseline_status == 200:
+            if is_good_status(baseline_status):
                 baseline_display = f"✅{baseline_status}"
-            elif 300 <= baseline_status < 400:
-                baseline_display = f"⚠️{baseline_status}"
-            elif baseline_status >= 400:
+            elif is_bad_status(baseline_status):
                 baseline_display = f"❌{baseline_status}"
             else:
-                baseline_display = str(baseline_status)
+                baseline_display = f"⚠️{baseline_status}"
         else:
             baseline_display = "N/A"
         
         # Format current status
         if latest_status:
-            if latest_status == 200:
+            if is_good_status(latest_status):
                 current_display = f"✅{latest_status}"
-            elif 300 <= latest_status < 400:
-                current_display = f"⚠️{latest_status}"
-            elif latest_status >= 400:
+            elif is_bad_status(latest_status):
                 current_display = f"❌{latest_status}"
             else:
-                current_display = str(latest_status)
+                current_display = f"⚠️{latest_status}"
         else:
             current_display = "N/A"
         
@@ -257,7 +273,6 @@ class SiteEvaluator:
         site_link = f"[{self.domain}](http://dontdeletezoltan.man-1.solus.stage.town/sites/{self.site.id}/)"
         
         # Format the text with site link, baseline→current status, and values
-        # Order: site_link | baseline→current | ssim(ok/warning/fail) | score | change%
         text = (
             f"| {site_link} | "
             f"{baseline_display}→{current_display} | "
