@@ -1953,7 +1953,7 @@ def dispatch_comparison(request):
             target=wait_for_completion_and_notify,
             args=(results['target'], results['sites'], results['start_time'])
         )
-        thread.daemon = True
+        thread.daemon = False
         thread.start()
         
         # Return immediate response
@@ -2037,7 +2037,7 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
             all_job_ids.append(job_id)
     
     total_jobs = len(all_job_ids)
-    print(f"⏳ Waiting for {total_jobs} jobs to complete...")
+    print(f"⏳ Waiting for {total_jobs} jobs to complete in notify ..")
     
     # Wait for all jobs to complete
     max_wait = 3600  # 60 minutes max
@@ -2045,15 +2045,19 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     completed_jobs = 0
     
     while waited < max_wait and completed_jobs < total_jobs:
-        completed_jobs = 0
+        
+        print(f"⏳ Checking job statuses... ({completed_jobs}/{total_jobs} completed)")
         for job_id in all_job_ids:
+            # print(f"⏳ Checking job {job_id}...")
             try:
                 job = Job.fetch(job_id, connection=connection)
                 status = job.get_status()
-                if status in ['finished', 'failed']:
+                # print(f"Job {job_id} status: {type(status.value)}")
+                if status.value in ['finished', 'failed']:
+                    
                     completed_jobs += 1
-            except:
-                pass
+            except Exception as e:
+                print(f"⚠️ Could not fetch job {job_id}: {e}")   
         
         if completed_jobs < total_jobs:
             time.sleep(5)
@@ -2149,7 +2153,7 @@ def wait_for_completion_and_notify_compact(target, sites_data, start_time):
             all_job_ids.append(job_id)
     
     total_jobs = len(all_job_ids)
-    print(f"⏳ Waiting for {total_jobs} jobs to complete...")
+    print(f"⏳ Waiting for {total_jobs} jobs to complete short...")
     
     # Wait for all jobs to complete
     max_wait = 300
@@ -2159,6 +2163,7 @@ def wait_for_completion_and_notify_compact(target, sites_data, start_time):
     while waited < max_wait and completed_jobs < total_jobs:
         completed_jobs = 0
         for job_id in all_job_ids:
+            print(f"⏳ Checking job {job_id}...")
             try:
                 job = Job.fetch(job_id, connection=connection)
                 status = job.get_status()
