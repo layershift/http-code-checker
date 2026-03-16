@@ -85,13 +85,13 @@ RQ_QUEUES = {
         'DB': 0,
         'DEFAULT_TIMEOUT': 360,
     },
-    'high': {
+    'comparison': {
         'HOST': 'localhost',
         'PORT': 6379,
         'DB': 0,
         'DEFAULT_TIMEOUT': 500,
     },
-    'low': {
+    'scoring': {
         'HOST': 'localhost',
         'PORT': 6379,
         'DB': 0,

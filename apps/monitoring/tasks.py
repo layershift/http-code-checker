@@ -276,7 +276,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
         print(f"🏁 Capture task finished for snapshot {snapshot_id}")
 
 
-@job('default')
+@job('comparison')
 def create_comparison_task(snapshot_id, site_id):
     """
     Task 2: Create comparison with baseline snapshot
@@ -431,7 +431,7 @@ def create_comparison_task(snapshot_id, site_id):
     finally:
         close_old_connections()
 
-@job('default')
+@job('scoring')
 def calculate_site_score_task(snapshot_id):
     """
     Calculate quality scores for a site based on its snapshot
