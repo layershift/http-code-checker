@@ -43,9 +43,10 @@ uv run  manage.py runserver 0.0.0.0:8000
 
 #### Rq workers
 
-##### Create systemd file 
+##### Two services
+###### Create systemd file for default (4 workers)
 ```
-cat "/etc/systemd/system/rq@.service"
+cat "/etc/systemd/system/rq-default@.service"
 [Unit]
 Description=RQ Worker Number %i
 After=multi-user.target
@@ -54,19 +55,42 @@ After=multi-user.target
 User=httpcodechecker
 Group=httpcodechecker
 WorkingDirectory=/home/httpcodechecker/http-code-checker
-ExecStart = /home/httpcodechecker/.local/bin/uv run /home/httpcodechecker/http-code-checker/manage.py rqworker high default low monitoring --with-scheduler
+ExecStart = /home/httpcodechecker/.local/bin/uv run /home/httpcodechecker/http-code-checker/manage.py rqworker default --with-scheduler
 Restart = always
 Type = simple
 
 [Install]
 WantedBy=multi-user.target
 ```
+###### Create systemd file  (2 workers)
+
+```
+ cat /etc/systemd/system/rq@.service
+[Unit]
+Description=RQ Worker Number %i
+After=multi-user.target
+
+[Service]
+User=httpcodechecker
+Group=httpcodechecker
+WorkingDirectory=/home/httpcodechecker/http-code-checker
+ExecStart = /home/httpcodechecker/.local/bin/uv run /home/httpcodechecker/http-code-checker/manage.py rqworker comparison scoring  monitoring --with-scheduler
+Restart = always
+Type = simple
+
+[Install]
+WantedBy=multi-user.target
+
+```
+
+These are needed so that we always have free workers for comparison , scoring , so that report wont get stuck
 
 ##### Reload sysctl and enable services
 ```
 systemctl daemon-reload
 systemctl  enable rq@1.service --now
 systemctl  enable rq@2.service --now
+systemctl enable   rq-default@1.service rq-default@2.service  rq-default@3.service rq-default@4.service --now
 ```
 #### Server
 
