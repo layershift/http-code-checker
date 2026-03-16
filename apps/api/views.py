@@ -1953,7 +1953,7 @@ def dispatch_comparison(request):
             target=wait_for_completion_and_notify,
             args=(results['target'], results['sites'], results['start_time'])
         )
-        thread.daemon = False
+        thread.daemon = True
         thread.start()
         
         # Return immediate response
@@ -2009,7 +2009,7 @@ def enqueue_site_monitoring(site, queue):
     score_job = queue.enqueue(
         monitor_site_score_task,
         site.id,
-        depends_on=screenshot_job
+        depends_on=comparison_job
     )
     
     return {
@@ -2036,7 +2036,7 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         for job_type, job_id in site['jobs'].items():
             all_job_ids.append(job_id)
     
-    total_jobs = len(all_job_ids)
+    total_jobs = len(all_job_ids)*4  # Each site has 3 jobs: screenshot, comparison, score, eval
     print(f"⏳ Waiting for {total_jobs} jobs to complete in notify ..")
     
     # Wait for all jobs to complete
