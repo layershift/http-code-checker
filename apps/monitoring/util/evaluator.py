@@ -221,10 +221,10 @@ class SiteEvaluator:
             overall_score = 0
         
         # Evaluate SSIM status - only relevant if we have a valid comparison
-        if has_valid_comparison and ssim_score < 0.70:  # Only consider SSIM if we actually compared
+        if has_valid_comparison and ssim_score < 0.90:  # Only consider SSIM if we actually compared
             ssim_status = "fail"
             ssim_regression = True
-        elif has_valid_comparison and ssim_score < 0.60:
+        elif has_valid_comparison and ssim_score < 0.98:
             ssim_status = "warning"
             ssim_regression = True  # Warning still counts as regression
         else:
