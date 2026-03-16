@@ -166,6 +166,138 @@
         </div>
     </div>
 
+    <!-- ===== FIXED: BASELINE VS LATEST HEAD-TO-HEAD COMPARISON ===== -->
+    {% with baseline_snapshot=site.snapshots.filter|dictsortreversed:"is_baseline"|first %}
+    {% with latest_snapshot=snapshots.first %}
+    {% if baseline_snapshot and latest_snapshot and baseline_snapshot.id != latest_snapshot.id %}
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">Baseline vs Latest Comparison</h3>
+        
+        <!-- Comparison Metrics Card -->
+        {% with comparison=site.comparisons.first %}
+        {% if comparison %}
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-50 rounded-lg p-4 text-center">
+                <div class="text-sm text-gray-600">SSIM Score</div>
+                <div class="text-2xl font-bold {% if comparison.ssim_score > 0.95 %}text-green-600{% elif comparison.ssim_score > 0.8 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                    {{ comparison.ssim_score|floatformat:3 }}
+                </div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-4 text-center">
+                <div class="text-sm text-gray-600">Change %</div>
+                <div class="text-2xl font-bold {% if comparison.percent_difference < 5 %}text-green-600{% elif comparison.percent_difference < 15 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                    {{ comparison.percent_difference|floatformat:1 }}%
+                </div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-4 text-center">
+                <div class="text-sm text-gray-600">Changed Pixels</div>
+                <div class="text-2xl font-bold">{{ comparison.changed_pixels }}</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-4 text-center">
+                <div class="text-sm text-gray-600">Total Pixels</div>
+                <div class="text-2xl font-bold">{{ comparison.total_pixels }}</div>
+            </div>
+        </div>
+        {% endif %}
+        {% endwith %}
+        
+        <!-- Side-by-side images with highlighting -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Latest - LEFT side with green highlight -->
+            <div class="border-2 border-green-300 rounded-lg overflow-hidden shadow-lg">
+                <div class="bg-green-100 px-4 py-2 border-b border-green-300">
+                    <h4 class="font-semibold text-green-800">📸 Latest Snapshot</h4>
+                    <p class="text-xs text-green-600">{{ latest_snapshot.taken_at|date:"Y-m-d H:i:s" }}</p>
+                </div>
+                <div class="p-4 bg-green-50">
+                    {% if latest_snapshot.screenshot %}
+                    <img src="{{ latest_snapshot.screenshot.url }}" 
+                         alt="Latest screenshot"
+                         class="w-full h-auto rounded border border-green-300 cursor-pointer"
+                         onclick="openImageModal('{{ latest_snapshot.screenshot.url }}', 'Latest: {{ latest_snapshot.taken_at|date:"Y-m-d H:i:s" }}')">
+                    <div class="mt-2 text-center">
+                        <span class="inline-block bg-green-600 text-white text-xs px-2 py-1 rounded-full">
+                            <i class="fas fa-clock mr-1"></i>{{ latest_snapshot.taken_at|timesince }} ago
+                        </span>
+                    </div>
+                    {% else %}
+                    <div class="bg-gray-200 h-48 flex items-center justify-center rounded">
+                        <span class="text-gray-500">No screenshot</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Baseline - RIGHT side with purple highlight -->
+            <div class="border-2 border-purple-300 rounded-lg overflow-hidden shadow-lg">
+                <div class="bg-purple-100 px-4 py-2 border-b border-purple-300">
+                    <h4 class="font-semibold text-purple-800">⭐ Baseline Snapshot</h4>
+                    <p class="text-xs text-purple-600">{{ baseline_snapshot.taken_at|date:"Y-m-d H:i:s" }}</p>
+                </div>
+                <div class="p-4 bg-purple-50">
+                    {% if baseline_snapshot.screenshot %}
+                    <img src="{{ baseline_snapshot.screenshot.url }}" 
+                         alt="Baseline screenshot"
+                         class="w-full h-auto rounded border border-purple-300 cursor-pointer"
+                         onclick="openImageModal('{{ baseline_snapshot.screenshot.url }}', 'Baseline: {{ baseline_snapshot.taken_at|date:"Y-m-d H:i:s" }}')">
+                    <div class="mt-2 text-center">
+                        <span class="inline-block bg-purple-600 text-white text-xs px-2 py-1 rounded-full">
+                            <i class="fas fa-star mr-1"></i>Baseline
+                        </span>
+                    </div>
+                    {% else %}
+                    <div class="bg-gray-200 h-48 flex items-center justify-center rounded">
+                        <span class="text-gray-500">No screenshot</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Heatmap and Difference Images -->
+        {% with comparison=site.comparisons.first %}
+        {% if comparison and comparison.heatmap or comparison.diff_image %}
+        <div class="mt-6">
+            <h4 class="font-semibold text-gray-700 mb-3">Visual Changes</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {% if comparison.heatmap %}
+                <div class="border rounded-lg overflow-hidden">
+                    <div class="bg-gray-100 px-4 py-2 border-b">
+                        <h5 class="font-medium text-gray-700">Heatmap</h5>
+                        <p class="text-xs text-gray-500">Red = more change</p>
+                    </div>
+                    <div class="p-4">
+                        <img src="{{ comparison.heatmap.url }}" 
+                             alt="Heatmap"
+                             class="w-full h-auto rounded border cursor-pointer"
+                             onclick="openImageModal('{{ comparison.heatmap.url }}', 'Heatmap - SSIM: {{ comparison.ssim_score|floatformat:3 }}')">
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if comparison.diff_image %}
+                <div class="border rounded-lg overflow-hidden">
+                    <div class="bg-gray-100 px-4 py-2 border-b">
+                        <h5 class="font-medium text-gray-700">Difference Overlay</h5>
+                        <p class="text-xs text-gray-500">Red = changed pixels</p>
+                    </div>
+                    <div class="p-4">
+                        <img src="{{ comparison.diff_image.url }}" 
+                             alt="Difference overlay"
+                             class="w-full h-auto rounded border cursor-pointer"
+                             onclick="openImageModal('{{ comparison.diff_image.url }}', 'Difference overlay - {{ comparison.changed_pixels }} pixels changed')">
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        {% endwith %}
+    </div>
+    {% endif %}
+    {% endwith %}
+    {% endwith %}
+
     <!-- Score Card -->
     <div class="bg-white rounded-lg shadow p-6">
         <h3 class="text-lg font-semibold text-gray-800 mb-4">Site Quality Score</h3>
@@ -500,7 +632,6 @@ function triggerNewSnapshot() {
 
 function setExistingAsBaseline(snapshotId) {
     if (confirm('Set this existing snapshot as the new baseline? This will unset the current baseline.')) {
-        // Call a new API endpoint that ONLY updates the baseline flag
         fetch(`/api/v1/snapshots/${snapshotId}/set-baseline/`, {
             method: 'POST',
             headers: {
