@@ -2127,20 +2127,25 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         header = f"📊 Monitoring Results for Server: {target_name}"
     else:
         header = f"📊 Monitoring Results for Domain: {target_name}"
-    
+
     status_emoji = "✅" if all_pass else "⚠️"
-    
+
     full_message = (
         f"{header}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Sites: {len(sites_data)} | Jobs: {total_jobs} | Duration: {duration:.1f}s\n"
         f"Overall Status: {status_emoji} {'PASS' if all_pass else 'FAIL'}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"| Site Name | Status | SSIM | Score | Change \n"
-        f"| --- | --- | --- | --- | --- \n"
-        f"{monitoring_text}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━"
     )
+
+    if not all_pass:
+        table = (
+            f"\n\n| Site Name | Status | SSIM | Score | Change \n"
+            f"| --- | --- | --- | --- | --- \n"
+            f"{monitoring_text}\n"
+        )
+        full_message += table
+        full_message += f"\n\n━━━━━━━━━━━━━━━━━━━━━━━"
     
     # Send notification
     try:
