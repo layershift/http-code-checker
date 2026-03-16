@@ -2032,36 +2032,56 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     
     # Collect all job IDs
     all_job_ids = []
+    site_job_map = {} 
+
     for site in sites_data:
+        site_name = site['name']
         for job_type, job_id in site['jobs'].items():
             all_job_ids.append(job_id)
-    
-    total_jobs = len(all_job_ids)*3  # Each site has 3 jobs: screenshot, comparison, score, eval
-    print(f"⏳ Waiting for {total_jobs} jobs to complete in notify ..")
-    
-    # Wait for all jobs to complete
-    max_wait = 3600  # 60 minutes max
+            site_job_map[job_id] = {
+                'site': site_name,
+                'type': job_type
+            }
+
+    total_jobs = len(all_job_ids)
+    print(f"⏳ Waiting for {total_jobs} jobs from {len(sites_data)} sites...")
+
+    max_wait = 3600
     waited = 0
-    completed_jobs = 0
-    
-    while waited < max_wait and completed_jobs < total_jobs:
+    job_statuses = {job_id: 'queued' for job_id in all_job_ids}
+
+    # Track completed sites
+    site_completion = {site['name']: {job_type: False for job_type in site['jobs'].keys()} for site in sites_data}
+
+    while waited < max_wait:
+        completed_jobs = 0
         
-        print(f"⏳ Checking job statuses... ({completed_jobs}/{total_jobs} completed)")
         for job_id in all_job_ids:
-            # print(f"⏳ Checking job {job_id}...")
             try:
                 job = Job.fetch(job_id, connection=connection)
                 status = job.get_status()
-                # print(f"Job {job_id} status: {type(status.value)}")
+                job_statuses[job_id] = status.value
+                
                 if status.value in ['finished', 'failed']:
-                    
                     completed_jobs += 1
-            except Exception as e:
-                print(f"⚠️ Could not fetch job {job_id}: {e}")   
+                    if job_id in site_job_map:
+                        site_name = site_job_map[job_id]['site']
+                        job_type = site_job_map[job_id]['type']
+                        site_completion[site_name][job_type] = True
+            except:
+                job_statuses[job_id] = 'expired'
+                completed_jobs += 1
+    
+        completed_sites = sum(1 for site, jobs in site_completion.items() 
+                            if all(jobs.values()))
+    
+        print(f"⏳ Progress: {completed_jobs}/{total_jobs} jobs, {completed_sites}/{len(sites_data)} sites complete")
         
-        if completed_jobs < total_jobs:
-            time.sleep(5)
-            waited += 5
+        if completed_jobs >= total_jobs:
+            break
+        
+        time.sleep(5)
+        waited += 5
     
     # Calculate duration
     end_time = datetime.now()
