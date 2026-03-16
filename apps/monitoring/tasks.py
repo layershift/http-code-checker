@@ -193,6 +193,54 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
             # ====================================
             score_job = calculate_site_score_task.delay(snapshot_id)
             print(f"📊 Enqueued site score job: {score_job.id}")
+            print("⏳ Waiting for comparison and score jobs to complete...")
+            
+            from rq.job import Job
+            from django_rq import get_queue
+            import time
+            
+            queue = get_queue('default')
+            connection = queue.connection
+            
+            jobs_to_wait = []
+            if comparison_job:
+                jobs_to_wait.append(comparison_job.id)
+            if score_job:
+                jobs_to_wait.append(score_job.id)
+            
+            max_wait = 300  # 5 minutes total wait
+            waited = 0
+            completed = 0
+            
+            while waited < max_wait and completed < len(jobs_to_wait):
+                completed = 0
+                for job_id in jobs_to_wait:
+                    try:
+                        job = Job.fetch(job_id, connection=connection)
+                        status = job.get_status()
+                        if status in ['finished', 'failed']:
+                            completed += 1
+                    except:
+                        pass
+                
+                if completed < len(jobs_to_wait):
+                    time.sleep(2)
+                    waited += 2
+            
+            # Check final status
+            if comparison_job:
+                try:
+                    job = Job.fetch(comparison_job.id, connection=connection)
+                    print(f"✅ Comparison job finished with status: {job.get_status()}")
+                except:
+                    print(f"⚠️ Could not fetch comparison job status")
+            
+            if score_job:
+                try:
+                    job = Job.fetch(score_job.id, connection=connection)
+                    print(f"✅ Score job finished with status: {job.get_status()}")
+                except:
+                    print(f"⚠️ Could not fetch score job status")
             
         else:
             snapshot.save()
