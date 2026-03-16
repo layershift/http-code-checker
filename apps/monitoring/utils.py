@@ -18,7 +18,7 @@ def capture_screenshot_for_snapshot(snapshot_id):
     temp_path = None
 
     browser_headers = {
-        'User-Agent': 'Mozilla/5.0 (compatible; monitoring360bot/1.1; +https://app.360monitoring.com/bot.html)',
+        'User-Agent': 'Chrome/145.0.0.0 (compatible; Layershift/StatusChecker)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
         'Accept-Encoding': 'gzip, deflate, br',
@@ -56,7 +56,7 @@ def capture_screenshot_for_snapshot(snapshot_id):
         # Take screenshot with Playwright
         print("🚀 Launching Playwright...")
         with sync_playwright() as p:
-            browser = p.firefox.launch(
+            browser = p.chromium.launch(
                 headless=True,
                 args=[
                     "--no-sandbox", 
@@ -71,10 +71,10 @@ def capture_screenshot_for_snapshot(snapshot_id):
                 ]
                 )
             
-            context = browser.new_context(extra_http_headers=browser_headers,viewport={'width': 1920, 'height': 1080})
+            context = browser.new_context(extra_http_headers=browser_headers,viewport={'width': 800, 'height': 600})
             print("✅ Browser launched")
 
-            page = context.browser.new_page(viewport={"width": 1920, "height": 1080})
+            page = context.browser.new_page(viewport={'width': 800, 'height': 600})
             print("✅ Page created")
 
             try:
