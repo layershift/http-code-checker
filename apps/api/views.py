@@ -1998,24 +1998,24 @@ def enqueue_site_monitoring(site, queue):
     )
     
     # Enqueue comparison task (depends on screenshot)
-    comparison_job = queue.enqueue(
-        create_comparison_task,
-        snapshot.id,
-        site.id,
-        depends_on=screenshot_job
-    )
+    # comparison_job = queue.enqueue(
+    #     create_comparison_task,
+    #     snapshot.id,
+    #     site.id,
+    #     depends_on=screenshot_job
+    # )
     
     # Enqueue score task (depends on screenshot)
-    score_job = queue.enqueue(
-        monitor_site_score_task,
-        site.id,
-        depends_on=comparison_job
-    )
+    # score_job = queue.enqueue(
+    #     monitor_site_score_task,
+    #     site.id,
+    #     depends_on=comparison_job
+    # )
     
     return {
         'screenshot': screenshot_job.id,
-        'comparison': comparison_job.id,
-        'score': score_job.id
+        # 'comparison': comparison_job.id,
+        # 'score': score_job.id
     }
 
 
@@ -2036,7 +2036,7 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         for job_type, job_id in site['jobs'].items():
             all_job_ids.append(job_id)
     
-    total_jobs = len(all_job_ids)*4  # Each site has 3 jobs: screenshot, comparison, score, eval
+    total_jobs = len(all_job_ids)*3  # Each site has 3 jobs: screenshot, comparison, score, eval
     print(f"⏳ Waiting for {total_jobs} jobs to complete in notify ..")
     
     # Wait for all jobs to complete
