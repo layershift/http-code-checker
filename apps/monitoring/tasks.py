@@ -15,7 +15,7 @@ from rq.registry import StartedJobRegistry, ScheduledJobRegistry, FinishedJobReg
 
 print("🔄 Loading tasks module...")
 
-@job('default')
+@job('default', result_ttl=3600)
 def capture_screenshot_task(snapshot_id, site_name, site_id):
     """
     Task 1: Capture screenshot for a snapshot - then trigger comparison
@@ -276,7 +276,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
         print(f"🏁 Capture task finished for snapshot {snapshot_id}")
 
 
-@job('comparison')
+@job('comparison', result_ttl=3600)
 def create_comparison_task(snapshot_id, site_id):
     """
     Task 2: Create comparison with baseline snapshot
@@ -431,7 +431,7 @@ def create_comparison_task(snapshot_id, site_id):
     finally:
         close_old_connections()
 
-@job('scoring')
+@job('scoring', result_ttl=3600)
 def calculate_site_score_task(snapshot_id):
     """
     Calculate quality scores for a site based on its snapshot
