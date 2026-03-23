@@ -110,9 +110,9 @@ main() {
             fi
             echo -e "${BLUE}Adding domain: $2${NC}"
             PAYLOAD=$(build_json_payload "domain" "$2" "$TICKET_ID")
-            curl -X POST "${BASE_URL}/dispatch_comparison/" \
+            curl -X POST "${BASE_URL}/sites/" \
                 -H "Content-Type: application/json" \
-                -d "$PAYLOAD"
+                -d "{\"name\":\"$2\"}"
             echo ""
             ;;
             
