@@ -34,7 +34,7 @@ class SiteSnapshotAdmin(admin.ModelAdmin):
     list_filter = ['site', 'http_status_code', 'taken_at', 'is_baseline']
     readonly_fields = ['taken_at', 'screenshot_preview', 'comparison_info']
     fields = ['site', 'http_status_code', 'content_length', 'ssim_score', 'is_baseline', 'screenshot', 'taken_at', 
-              'screenshot_preview', 'comparison_info']
+              'screenshot_preview', 'comparison_info', 'ticket']
     
     actions = ['enqueue_screenshot_capture', 'enqueue_comparison', 'set_as_baseline']
     

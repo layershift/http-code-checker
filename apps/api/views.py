@@ -1880,6 +1880,7 @@ def dispatch_comparison(request):
             data = request.data
         
         print(f"📡 Received monitoring dispatch request: {data} xxx")
+        ticket_id= data.get('ticket_id')
         server_name = data.get('server')
         domain_name = data.get('domain') or data.get('site') or data.get('name')
         
@@ -1908,7 +1909,7 @@ def dispatch_comparison(request):
                 }
                 
                 # Create and enqueue jobs for this site
-                job_ids = enqueue_site_monitoring(site, queue)
+                job_ids = enqueue_site_monitoring(site, queue, ticket_id=ticket_id)
                 
                 results['sites'].append({
                     'name': site.name,
@@ -1935,7 +1936,7 @@ def dispatch_comparison(request):
                 }
                 
                 for site in sites:
-                    job_ids = enqueue_site_monitoring(site, queue)
+                    job_ids = enqueue_site_monitoring(site, queue, ticket_id=ticket_id)
                     
                     results['sites'].append({
                         'name': site.name,
@@ -1979,14 +1980,16 @@ def dispatch_comparison(request):
         }, status=500)
 
 
-def enqueue_site_monitoring(site, queue):
+def enqueue_site_monitoring(site, queue, ticket_id=None):
     """Helper function to enqueue all monitoring jobs for a site"""
     
     # Create snapshot
+    print(f"⏱️ Creating snapshot for site: {site.name} (ticket_id={ticket_id})")
     snapshot = SiteSnapshot.objects.create(
         site=site,
         http_status_code=0,
-        content_length=0
+        content_length=0,
+        ticket=ticket_id
     )
     
     # Enqueue screenshot task
@@ -2146,11 +2149,18 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         )
         full_message += table
         full_message += f"\n\n━━━━━━━━━━━━━━━━━━━━━━━"
-    
+
+    print(f"Site: {site_name}, Ticket ID: --------------------------")
+    ticket_id=SiteSnapshot.objects.filter(site__name=site_name).first()
+    if ticket_id is not None:
+        ticket_id = ticket_id.ticket
+    else:
+        ticket_id = "No Ticket ID"
+    print(f"Site: {site_name}, Ticket ID: {ticket_id} --------------------------")
     # Send notification
     try:
         Notify.send(
-            title=f"{os.getenv('ZULIP_SUBJECT', 'Monitoring Complete :')} {target_name}",
+            title=f"{ticket_id} {os.getenv('ZULIP_SUBJECT', 'Monitoring Complete :')} {target_name}",
             body=full_message
         )
         print("✅ Monitoring results notification sent")
