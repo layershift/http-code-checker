@@ -151,7 +151,9 @@ class SiteSnapshot(models.Model):
     ssim_score = models.FloatField(null=True, blank=True)
 
     taken_at = models.DateTimeField(auto_now_add=True)
-    
+
+    ticket = models.CharField(max_length=320, null=True, blank=True)
+        
     # NEW: Baseline field
     is_baseline = models.BooleanField(
         default=False,
