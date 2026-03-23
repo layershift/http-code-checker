@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 [OPTION] [ARGUMENT]"
+    echo "Usage: $0 [OPTION] [ARGUMENT] [--ticket TICKET_ID]"
     echo "Options:"
     echo "  --add-server                       Add server using hostname"
     echo "  --add-domain DOMAIN                Add specific domain"
@@ -27,6 +27,9 @@ usage() {
     echo "  --report DOMAIN                    Generate report for specific domain"
     echo "  --report-all                       Generate server report"
     echo "  --help                             Show this help message"
+    echo ""
+    echo "Optional ticket parameter:"
+    echo "  --ticket TICKET_ID                 Add ticket ID to dispatch comparison requests (default: None)"
 }
 
 # Function to check if curl is available
@@ -45,6 +48,36 @@ check_plesk() {
     fi
 }
 
+# Function to extract ticket_id from arguments
+get_ticket_id() {
+    local ticket="None"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ticket)
+                ticket="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    echo "$ticket"
+}
+
+# Function to build JSON payload with ticket_id
+build_json_payload() {
+    local key="$1"
+    local value="$2"
+    local ticket="$3"
+    
+    if [ "$ticket" = "None" ]; then
+        echo "{\"$key\": \"$value\"}"
+    else
+        echo "{\"$key\": \"$value\", \"ticket_id\": \"$ticket\"}"
+    fi
+}
+
 # Main script logic
 main() {
     check_curl
@@ -53,6 +86,12 @@ main() {
         usage
         exit 1
     fi
+    
+    # Store all arguments for processing
+    ALL_ARGS=("$@")
+    
+    # Get ticket_id from arguments
+    TICKET_ID=$(get_ticket_id "${ALL_ARGS[@]}")
     
     case "$1" in
         --add-server)
@@ -63,7 +102,6 @@ main() {
             echo ""
             ;;
             
-                    
         --add-domain)
             if [ -z "$2" ]; then
                 echo -e "${RED}Error: Domain name required${NC}"
@@ -71,9 +109,10 @@ main() {
                 exit 1
             fi
             echo -e "${BLUE}Adding domain: $2${NC}"
+            PAYLOAD=$(build_json_payload "domain" "$2" "$TICKET_ID")
             curl -X POST "${BASE_URL}/dispatch_comparison/" \
                 -H "Content-Type: application/json" \
-                -d "{\"domain\": \"$2\"}"
+                -d "$PAYLOAD"
             echo ""
             ;;
             
@@ -155,17 +194,19 @@ main() {
                 exit 1
             fi
             echo -e "${BLUE}Generating report for domain: $2${NC}"
+            PAYLOAD=$(build_json_payload "domain" "$2" "$TICKET_ID")
             curl -X POST "${BASE_URL}/dispatch_comparison/" \
                 -H "Content-Type: application/json" \
-                -d "{\"domain\": \"$2\"}"
+                -d "$PAYLOAD"
             echo ""
             ;;
             
         --report-all)
             echo -e "${BLUE}Generating server report for: $HOSTNAME${NC}"
+            PAYLOAD=$(build_json_payload "server" "$HOSTNAME" "$TICKET_ID")
             curl -X POST "${BASE_URL}/dispatch_comparison/" \
                 -H "Content-Type: application/json" \
-                -d "{\"server\": \"$HOSTNAME\"}"
+                -d "$PAYLOAD"
             echo ""
             ;;
             
