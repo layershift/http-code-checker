@@ -3,7 +3,7 @@ from django.db.models import Count, Q
 from apps.monitoring.models import Server, Site, SiteSnapshot, SiteScore
 from apps.infrastructure.models import IPAddress, IPClass
 from django.shortcuts import render, get_object_or_404 
-import json
+import json, os
 from django.db.models import Avg
 from apps.core.decorators.decorators import ip_allow
 from django.utils.decorators import method_decorator
@@ -122,6 +122,8 @@ class ServerDetailView(DetailView):
         context['top_performers'] = sorted(sites_with_scores, key=lambda x: x['avg_score'], reverse=True)[:5]
         context['bottom_performers'] = sorted(sites_with_scores, key=lambda x: x['avg_score'])[:5]
         
+        atlas_base = os.getenv('ATLAS_URL', 'https://atlas.man-1.vm.plesk-server.com/warehouse/vmdetail_brief/')
+        context['atlas_url'] = f"{atlas_base}{self.object.name}"
         return context
 
 

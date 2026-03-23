@@ -45,10 +45,20 @@
                         {% endif %}
                     </span>
                 </div>
+                <!-- Atlas URL - NEW SECTION -->
+                <div class="flex justify-between py-2 border-b">
+                    <span class="text-gray-600">Atlas URL:</span>
+                    <a href="{{ atlas_url }}" target="_blank" 
+                       class="text-blue-600 hover:text-blue-800 font-mono text-sm break-all">
+                        <!-- {{ atlas_url }} -->
+                          Details in Atlas
+                    </a>
+                </div>
                 <div class="flex justify-between py-2 border-b">
                     <span class="text-gray-600">Description:</span>
                     <span class="text-gray-800">{{ server.description|default:"No description" }}</span>
                 </div>
+                
             </div>
         </div>
 
@@ -120,7 +130,7 @@
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Avg Score</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Latest Score</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Actions</th>
-                    </tr>
+                     </tr>
                 </thead>
                 <tbody>
                     {% for site in sites %}
