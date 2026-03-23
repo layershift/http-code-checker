@@ -166,15 +166,15 @@
         </div>
     </div>
 
-    <!-- ===== FIXED: BASELINE VS LATEST HEAD-TO-HEAD COMPARISON ===== -->
+    <!-- ===== BASELINE VS LATEST HEAD-TO-HEAD COMPARISON ===== -->
     {% with baseline_snapshot=site.snapshots.filter|dictsortreversed:"is_baseline"|first %}
     {% with latest_snapshot=snapshots.first %}
     {% if baseline_snapshot and latest_snapshot and baseline_snapshot.id != latest_snapshot.id %}
+    {% with comparison=site.comparisons.first %}
     <div class="bg-white rounded-lg shadow p-6">
         <h3 class="text-lg font-semibold text-gray-800 mb-4">Baseline vs Latest Comparison</h3>
         
         <!-- Comparison Metrics Card -->
-        {% with comparison=site.comparisons.first %}
         {% if comparison %}
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div class="bg-gray-50 rounded-lg p-4 text-center">
@@ -199,7 +199,6 @@
             </div>
         </div>
         {% endif %}
-        {% endwith %}
         
         <!-- Side-by-side images with highlighting -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -254,23 +253,31 @@
             </div>
         </div>
         
-        <!-- Heatmap and Difference Images -->
-        {% with comparison=site.comparisons.first %}
-        {% if comparison and comparison.heatmap or comparison.diff_image %}
+        <!-- Heatmap and Difference Images with Change % Header -->
+        {% if comparison %}
+        {% if comparison.heatmap or comparison.diff_image %}
         <div class="mt-6">
-            <h4 class="font-semibold text-gray-700 mb-3">Visual Changes</h4>
+            <div class="flex justify-between items-center mb-3">
+                <h4 class="font-semibold text-gray-700">Visual Changes</h4>
+                <div class="bg-gray-100 rounded-lg px-4 py-2">
+                    <span class="text-sm text-gray-600">Change: </span>
+                    <span class="text-xl font-bold {% if comparison.percent_difference < 5 %}text-green-600{% elif comparison.percent_difference < 15 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                        {{ comparison.percent_difference|floatformat:1 }}%
+                    </span>
+                </div>
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {% if comparison.heatmap %}
                 <div class="border rounded-lg overflow-hidden">
                     <div class="bg-gray-100 px-4 py-2 border-b">
                         <h5 class="font-medium text-gray-700">Heatmap</h5>
-                        <p class="text-xs text-gray-500">Red = more change</p>
+                        <p class="text-xs text-gray-500">Red = more change | {{ comparison.percent_difference|floatformat:1 }}% change</p>
                     </div>
                     <div class="p-4">
                         <img src="{{ comparison.heatmap.url }}" 
                              alt="Heatmap"
                              class="w-full h-auto rounded border cursor-pointer"
-                             onclick="openImageModal('{{ comparison.heatmap.url }}', 'Heatmap - SSIM: {{ comparison.ssim_score|floatformat:3 }}')">
+                             onclick="openImageModal('{{ comparison.heatmap.url }}', 'Heatmap - {{ comparison.percent_difference|floatformat:1 }}% change')">
                     </div>
                 </div>
                 {% endif %}
@@ -279,21 +286,22 @@
                 <div class="border rounded-lg overflow-hidden">
                     <div class="bg-gray-100 px-4 py-2 border-b">
                         <h5 class="font-medium text-gray-700">Difference Overlay</h5>
-                        <p class="text-xs text-gray-500">Red = changed pixels</p>
+                        <p class="text-xs text-gray-500">Red = changed pixels | {{ comparison.percent_difference|floatformat:1 }}% change</p>
                     </div>
                     <div class="p-4">
                         <img src="{{ comparison.diff_image.url }}" 
                              alt="Difference overlay"
                              class="w-full h-auto rounded border cursor-pointer"
-                             onclick="openImageModal('{{ comparison.diff_image.url }}', 'Difference overlay - {{ comparison.changed_pixels }} pixels changed')">
+                             onclick="openImageModal('{{ comparison.diff_image.url }}', 'Difference overlay - {{ comparison.percent_difference|floatformat:1 }}% change')">
                     </div>
                 </div>
                 {% endif %}
             </div>
         </div>
         {% endif %}
-        {% endwith %}
+        {% endif %}
     </div>
+    {% endwith %}
     {% endif %}
     {% endwith %}
     {% endwith %}
@@ -482,7 +490,7 @@
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Content Length</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Baseline</th>
                         <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Actions</th>
-                    </tr>
+                     </tr>
                 </thead>
                 <tbody>
                     {% for snapshot in snapshots %}
