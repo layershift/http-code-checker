@@ -2150,7 +2150,7 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     # Send notification
     try:
         Notify.send(
-            title=f"Monitoring Complete: {target_name}",
+            title=f"{os.getenv('ZULIP_SUBJECT', 'Monitoring Complete :')} {target_name}",
             body=full_message
         )
         print("✅ Monitoring results notification sent")
@@ -2241,7 +2241,7 @@ def wait_for_completion_and_notify_compact(target, sites_data, start_time):
     
     try:
         Notify.send(
-            title=f"Monitoring: {target_name}",
+            title=f"{os.getenv('ZULIP_SUBJECT', 'Monitoring Complete :')} {target_name}",
             body=full_message
         )
         print("✅ Compact monitoring notification sent")
