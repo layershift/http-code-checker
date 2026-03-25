@@ -8,6 +8,10 @@ import socket
 from django.urls import reverse
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.files.storage import default_storage
+import requests
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Import storage class for remote upload
 if getattr(settings, 'REMOTE_UPLOADER_ENABLED', False):
@@ -132,6 +136,42 @@ class Site(models.Model):
     def __str__(self):
         return self.name
 
+
+def delete_remote_file(file_id):
+    """
+    Helper function to delete a file from remote storage
+    Endpoint: DELETE /files/{file_id}?force=true
+    """
+    if not file_id or not getattr(settings, 'REMOTE_UPLOADER_ENABLED', False):
+        return True
+    
+    try:
+        uploader_url = settings.REMOTE_UPLOADER_URL
+        # Correct endpoint: /files/{file_id}?force=true
+        delete_url = f"{uploader_url}/files/{file_id}?force=true"
+        
+        print(f"🗑️ Deleting remote file: {delete_url}")
+        
+        response = requests.delete(delete_url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Successfully deleted remote file: {file_id} - {data.get('message', '')}")
+            return True
+        elif response.status_code == 404:
+            print(f"⚠️ Remote file not found (already deleted): {file_id}")
+            return True
+        else:
+            print(f"⚠️ Failed to delete remote file {file_id}: HTTP {response.status_code} - {response.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network error deleting remote file {file_id}: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Error deleting remote file {file_id}: {e}")
+        return False
+
+
 class SiteSnapshot(models.Model):
     """
     Each monitoring run result.
@@ -143,13 +183,12 @@ class SiteSnapshot(models.Model):
         related_name="snapshots"
     )
 
-    # FIXED: Use the storage instance, not the string
     screenshot = models.ImageField(
         upload_to=screenshot_upload_path, 
         null=True, 
         blank=True,
         max_length=500,
-        storage=remote_storage  # ← Use the instance, not the string
+        storage=remote_storage
     )
 
     http_status_code = models.PositiveIntegerField(null=True, blank=True)
@@ -185,6 +224,18 @@ class SiteSnapshot(models.Model):
         if self.is_baseline:
             SiteSnapshot.objects.filter(site=self.site, is_baseline=True).exclude(pk=self.pk).update(is_baseline=False)
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """Delete the associated remote screenshot file before deleting the database record."""
+        # Store the file_id before deleting the object
+        file_id = self.screenshot.name if self.screenshot else None
+        
+        # Delete the database record
+        super().delete(*args, **kwargs)
+        
+        # Delete the remote file
+        if file_id:
+            delete_remote_file(file_id)
 
 
 class ScreenshotComparison(models.Model):
@@ -233,13 +284,12 @@ class ScreenshotComparison(models.Model):
         help_text="Total number of pixels in the image"
     )
 
-    # FIXED: Use the storage instance
     heatmap = models.ImageField(
         upload_to='comparisons/heatmaps/',
         null=True,
         blank=True,
         help_text="Visual heatmap showing changes",
-        storage=remote_storage  # ← Use the instance
+        storage=remote_storage
     )
 
     diff_image = models.ImageField(
@@ -247,7 +297,7 @@ class ScreenshotComparison(models.Model):
         null=True,
         blank=True,
         help_text="Difference image highlighting changes",
-        storage=remote_storage  # ← Use the instance
+        storage=remote_storage
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -258,6 +308,22 @@ class ScreenshotComparison(models.Model):
 
     def __str__(self):
         return f"{self.site.name} - {self.previous_snapshot.taken_at} vs {self.current_snapshot.taken_at} (SSIM: {self.ssim_score:.3f})"
+
+    def delete(self, *args, **kwargs):
+        """Delete associated remote files (heatmap and diff) before deleting the database record."""
+        # Store file IDs before deletion
+        heatmap_id = self.heatmap.name if self.heatmap else None
+        diff_id = self.diff_image.name if self.diff_image else None
+        
+        # Delete the database record
+        super().delete(*args, **kwargs)
+        
+        # Delete remote files
+        if heatmap_id:
+            delete_remote_file(heatmap_id)
+        
+        if diff_id:
+            delete_remote_file(diff_id)
 
 
 class SiteScore(models.Model):
