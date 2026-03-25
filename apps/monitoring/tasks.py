@@ -5,15 +5,58 @@ import tempfile
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db import close_old_connections
+from django.conf import settings
 from rq import get_current_job
 from playwright.sync_api import sync_playwright
 from datetime import timedelta
 from django_rq import job, get_queue
-from rq import get_current_job
 from rq.registry import StartedJobRegistry, ScheduledJobRegistry, FinishedJobRegistry
-
+import requests
+import json
 
 print("🔄 Loading tasks module...")
+
+# Check if remote uploader is enabled
+REMOTE_UPLOADER_ENABLED = getattr(settings, 'REMOTE_UPLOADER_ENABLED', False)
+REMOTE_UPLOADER_URL = getattr(settings, 'REMOTE_UPLOADER_URL', 'http://dont-delete-uploader.man-1.solus.stage.town:8000')
+
+# Import storage class directly if remote uploader is enabled
+remote_storage = None
+if REMOTE_UPLOADER_ENABLED:
+    try:
+        from .storage import RemoteUploaderStorage
+        remote_storage = RemoteUploaderStorage()
+        print(f"✅ RemoteUploaderStorage initialized: {remote_storage}")
+    except Exception as e:
+        print(f"❌ Failed to initialize RemoteUploaderStorage: {e}")
+        REMOTE_UPLOADER_ENABLED = False  # Fall back to local
+
+
+def save_to_storage(instance, field_name, filename, file_data):
+    """
+    Save file using appropriate storage (bypasses Django's storage loading)
+    """
+    if remote_storage:
+        try:
+            # Use remote storage directly
+            file_id = remote_storage._save(filename, ContentFile(file_data))
+            setattr(instance, field_name, file_id)
+            instance.save(update_fields=[field_name])
+            print(f"✅ File uploaded to remote: {file_id}")
+            print(f"   URL: {remote_storage.url(file_id)}")
+            return True
+        except Exception as e:
+            print(f"❌ Remote upload failed: {e}, falling back to local")
+            # Fall back to local
+            getattr(instance, field_name).save(filename, ContentFile(file_data), save=True)
+            return True
+    else:
+        # Use local storage
+        getattr(instance, field_name).save(filename, ContentFile(file_data), save=True)
+        saved_path = getattr(instance, field_name).path
+        print(f"✅ File saved locally: {saved_path}")
+        return True
+
 
 @job('default', result_ttl=3600)
 def capture_screenshot_task(snapshot_id, site_name, site_id):
@@ -181,7 +224,10 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
         if screenshot_data and status_code and status_code < 400:
             filename = f"site_{site_id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.png"
             print(f"💾 Saving screenshot as: {filename}")
-            snapshot.screenshot.save(filename, ContentFile(screenshot_data), save=True)
+            
+            # Use the new save_to_storage function
+            save_to_storage(snapshot, 'screenshot', filename, screenshot_data)
+            
             screenshot_saved = True
             print(f"✅ Screenshot saved for snapshot {snapshot_id}")
             
@@ -379,7 +425,7 @@ def create_comparison_task(snapshot_id, site_id):
             # Create comparison object
             comparison = ScreenshotComparison.objects.create(
                 site_id=site_id,
-                previous_snapshot=baseline_snapshot,  # Always baseline as previous
+                previous_snapshot=baseline_snapshot,
                 current_snapshot=current_snapshot,
                 ssim_score=result['ssim_score'],
                 percent_difference=result['percent_difference'],
@@ -392,21 +438,15 @@ def create_comparison_task(snapshot_id, site_id):
             if result.get('heatmap_image_path') and os.path.exists(result['heatmap_image_path']):
                 with open(result['heatmap_image_path'], 'rb') as f:
                     heatmap_data = f.read()
-                comparison.heatmap.save(
-                    f"heatmap_baseline_vs_{current_snapshot.id}.png",
-                    ContentFile(heatmap_data)
-                )
-                print(f"✅ Saved heatmap")
+                filename = f"heatmap_{baseline_snapshot.id}_vs_{current_snapshot.id}.png"
+                save_to_storage(comparison, 'heatmap', filename, heatmap_data)
             
             # Save diff image if generated
             if result.get('diff_image_path') and os.path.exists(result['diff_image_path']):
                 with open(result['diff_image_path'], 'rb') as f:
                     diff_data = f.read()
-                comparison.diff_image.save(
-                    f"diff_baseline_vs_{current_snapshot.id}.png",
-                    ContentFile(diff_data)
-                )
-                print(f"✅ Saved diff image")
+                filename = f"diff_{baseline_snapshot.id}_vs_{current_snapshot.id}.png"
+                save_to_storage(comparison, 'diff_image', filename, diff_data)
             
             print(f"✅ Comparison with baseline completed for snapshot {snapshot_id}")
             
@@ -430,6 +470,7 @@ def create_comparison_task(snapshot_id, site_id):
         }
     finally:
         close_old_connections()
+
 
 @job('scoring', result_ttl=3600)
 def calculate_site_score_task(snapshot_id):
@@ -475,9 +516,7 @@ def calculate_site_score_task(snapshot_id):
         import traceback
         traceback.print_exc()
         return {'snapshot_id': snapshot_id, 'error': str(e)}
-    
 
-import traceback
 
 @job('monitoring')
 def monitor_site_score_task(site_id):
@@ -642,11 +681,6 @@ def has_other_pending_monitoring(site_id, current_job_id=None):
             continue
     
     return False
-
-
-def has_pending_monitoring(site_id):
-    """Legacy function - checks if any job exists (including current)"""
-    return has_other_pending_monitoring(site_id, None)
 
 
 def list_all_jobs(request):

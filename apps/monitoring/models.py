@@ -1,12 +1,25 @@
+# monitoring/models.py
 from django.db import models
 from django.core.validators import validate_ipv46_address
-from django.db import models
-import ipaddress
+from django.conf import settings
 from django.utils import timezone
 import os 
 import socket
 from django.urls import reverse
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.files.storage import default_storage
+
+# Import storage class for remote upload
+if getattr(settings, 'REMOTE_UPLOADER_ENABLED', False):
+    try:
+        from .storage import RemoteUploaderStorage
+        remote_storage = RemoteUploaderStorage()
+        print(f"✅ Using remote storage: {remote_storage}")
+    except Exception as e:
+        print(f"⚠️ Failed to load remote storage: {e}, falling back to default")
+        remote_storage = default_storage
+else:
+    remote_storage = default_storage
 
 def screenshot_upload_path(instance, filename):
     """
@@ -81,7 +94,7 @@ class Site(models.Model):
 
     monitoring_frequency = models.PositiveIntegerField(
         default=3,
-        validators=[MinValueValidator(1), MaxValueValidator(1440)],  # Min 1 minute, Max 24 hours
+        validators=[MinValueValidator(1), MaxValueValidator(1440)],
         help_text="Monitoring frequency in minutes (1-1440)"
     )
 
@@ -100,12 +113,8 @@ class Site(models.Model):
         Resolve the IPv4 address of the site
         """
         try:
-            # Get all IP addresses
             ip_list = socket.gethostbyname_ex(self.name)[2]
-            
-            # Filter for IPv4 addresses (they're already IPv4 from gethostbyname_ex)
             if ip_list:
-                # Store the first IPv4 address
                 self.resolved_ip = ip_list[0]
                 return self.resolved_ip
             else:
@@ -117,10 +126,7 @@ class Site(models.Model):
             print(f"Error resolving IP for {self.name}: {e}")
             return None
     
-    
-        
     def get_absolute_url(self):
-        """Return the URL to access this specific site"""
         return reverse('site_detail', args=[str(self.id)])
     
     def __str__(self):
@@ -137,11 +143,13 @@ class SiteSnapshot(models.Model):
         related_name="snapshots"
     )
 
+    # FIXED: Use the storage instance, not the string
     screenshot = models.ImageField(
         upload_to=screenshot_upload_path, 
         null=True, 
         blank=True,
-        max_length=500
+        max_length=500,
+        storage=remote_storage  # ← Use the instance, not the string
     )
 
     http_status_code = models.PositiveIntegerField(null=True, blank=True)
@@ -154,7 +162,6 @@ class SiteSnapshot(models.Model):
 
     ticket = models.CharField(max_length=320, null=True, blank=True)
         
-    # NEW: Baseline field
     is_baseline = models.BooleanField(
         default=False,
         help_text="If True, this is the baseline snapshot for comparisons"
@@ -162,7 +169,6 @@ class SiteSnapshot(models.Model):
 
     class Meta:
         ordering = ['-taken_at']
-        # Ensure only one baseline per site
         constraints = [
             models.UniqueConstraint(
                 fields=['site', 'is_baseline'],
@@ -176,15 +182,11 @@ class SiteSnapshot(models.Model):
         return f"{self.site.name} - {self.taken_at}{baseline}"
 
     def save(self, *args, **kwargs):
-        """Override save to handle baseline logic"""
         if self.is_baseline:
-            # If this is being set as baseline, remove baseline from all other snapshots of this site
             SiteSnapshot.objects.filter(site=self.site, is_baseline=True).exclude(pk=self.pk).update(is_baseline=False)
         super().save(*args, **kwargs)
 
 
-
-# models.py - Add this new model
 class ScreenshotComparison(models.Model):
     """
     Links two consecutive screenshots to track changes between monitoring runs
@@ -207,7 +209,6 @@ class ScreenshotComparison(models.Model):
         related_name="previous_comparisons"
     )
 
-    # Comparison metrics
     ssim_score = models.FloatField(
         null=True,
         blank=True,
@@ -232,28 +233,32 @@ class ScreenshotComparison(models.Model):
         help_text="Total number of pixels in the image"
     )
 
+    # FIXED: Use the storage instance
     heatmap = models.ImageField(
         upload_to='comparisons/heatmaps/',
         null=True,
         blank=True,
-        help_text="Visual heatmap showing changes"
+        help_text="Visual heatmap showing changes",
+        storage=remote_storage  # ← Use the instance
     )
 
     diff_image = models.ImageField(
         upload_to='comparisons/diffs/',
         null=True,
         blank=True,
-        help_text="Difference image highlighting changes"
+        help_text="Difference image highlighting changes",
+        storage=remote_storage  # ← Use the instance
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
-        unique_together = ['previous_snapshot', 'current_snapshot']  # Prevent duplicates
+        unique_together = ['previous_snapshot', 'current_snapshot']
 
     def __str__(self):
         return f"{self.site.name} - {self.previous_snapshot.taken_at} vs {self.current_snapshot.taken_at} (SSIM: {self.ssim_score:.3f})"
+
 
 class SiteScore(models.Model):
     """
@@ -272,24 +277,20 @@ class SiteScore(models.Model):
         related_name="score"
     )
     
-    # Score components (normalized 0-100)
     performance_score = models.FloatField(null=True, blank=True)
     seo_score = models.FloatField(null=True, blank=True)
     security_score = models.FloatField(null=True, blank=True)
     availability_score = models.FloatField(null=True, blank=True)
     content_quality_score = models.FloatField(null=True, blank=True)
     
-    # Overall composite score (weighted average)
     overall_score = models.FloatField(null=True, blank=True)
     
-    # Raw metrics that feed into scores
     page_load_time_ms = models.IntegerField(null=True, blank=True)
     ttfb_ms = models.IntegerField(null=True, blank=True)
     content_size_kb = models.IntegerField(null=True, blank=True)
     has_ssl = models.BooleanField(default=False)
     has_security_headers = models.BooleanField(default=False)
     
-    # Metadata
     calculated_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
