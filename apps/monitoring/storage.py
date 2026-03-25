@@ -44,6 +44,8 @@ class RemoteUploaderStorage(Storage):
                 timeout=30
             )
             
+            print(f"📤 Upload end")
+
             if response.status_code == 200:
                 data = response.json()
                 file_id = data.get('file_id')

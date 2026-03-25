@@ -29,33 +29,35 @@ if REMOTE_UPLOADER_ENABLED:
         print(f"✅ RemoteUploaderStorage initialized: {remote_storage}")
     except Exception as e:
         print(f"❌ Failed to initialize RemoteUploaderStorage: {e}")
-        REMOTE_UPLOADER_ENABLED = False  # Fall back to local
+        REMOTE_UPLOADER_ENABLED = False
 
 
 def save_to_storage(instance, field_name, filename, file_data):
     """
-    Save file using appropriate storage (bypasses Django's storage loading)
+    Save file using appropriate storage - saves the ENTIRE instance
     """
-    if remote_storage:
-        try:
-            # Use remote storage directly
+    try:
+        field = getattr(instance, field_name)
+        
+        if remote_storage:
+            # For remote storage: upload and set the field value to file_id
             file_id = remote_storage._save(filename, ContentFile(file_data))
             setattr(instance, field_name, file_id)
-            instance.save(update_fields=[field_name])
+            # Save the ENTIRE instance (saves all fields)
+            instance.save()
             print(f"✅ File uploaded to remote: {file_id}")
             print(f"   URL: {remote_storage.url(file_id)}")
-            return True
-        except Exception as e:
-            print(f"❌ Remote upload failed: {e}, falling back to local")
-            # Fall back to local
-            getattr(instance, field_name).save(filename, ContentFile(file_data), save=True)
-            return True
-    else:
-        # Use local storage
-        getattr(instance, field_name).save(filename, ContentFile(file_data), save=True)
-        saved_path = getattr(instance, field_name).path
-        print(f"✅ File saved locally: {saved_path}")
+        else:
+            # For local storage: use Django's save
+            field.save(filename, ContentFile(file_data), save=True)
+            print(f"✅ File saved locally: {field.path}")
+        
         return True
+    except Exception as e:
+        print(f"❌ Save failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 @job('default', result_ttl=3600)
@@ -71,7 +73,7 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
     screenshot_saved = False
     
     browser_headers = {
-        'User-Agent': 'Chrome/145.0.0.0 (compatible; Layershift/StatusChecker)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
         'Accept-Encoding': 'gzip, deflate, br',
@@ -128,7 +130,6 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                         "--disable-logging"
                     ]
                 )
-                # Create context with viewport and device scale factor
                 context = browser.new_context(
                     viewport={'width': 800, 'height': 600},
                     device_scale_factor=1
@@ -138,22 +139,13 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                 page = context.new_page()
                 print("✅ Page created")
                 
-                # === Intercept requests to apply custom headers (including for redirects) ===
                 def intercept_request(route, request):
-                    """Intercept and modify ALL requests (including redirects)"""
-                    
                     headers = request.headers
-                    
-                    # Create a new headers dict with our custom headers
                     modified_headers = {**headers, **browser_headers}
-                    
-                    # Reinject our headers
                     route.continue_(headers=modified_headers)
                 
-                # Register the interceptor for all requests
                 page.route("**/*", intercept_request)
                 
-                # Add stealth script to hide automation
                 page.add_init_script("""
                     Object.defineProperty(navigator, 'webdriver', {
                         get: () => undefined
@@ -187,7 +179,6 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
                     content_length = len(content.encode('utf-8'))
                     print(f"📊 Content length: {content_length}")
                     
-                    # Read screenshot data
                     with open(temp_path, 'rb') as f:
                         screenshot_data = f.read()
                     print(f"💾 Screenshot size: {len(screenshot_data)} bytes")
@@ -207,98 +198,59 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
             status_code = 500
             content_length = 0
         
-        # Update snapshot
+        # Update snapshot with status code and content length
         print("💾 Updating snapshot in database...")
         
-        # Refresh snapshot to ensure it's still there
+        # Refresh snapshot
         try:
             snapshot.refresh_from_db()
         except:
-            # If refresh fails, get a fresh copy
             close_old_connections()
             snapshot = SiteSnapshot.objects.get(id=snapshot_id)
         
         snapshot.http_status_code = status_code
         snapshot.content_length = content_length
         
+        # Save based on whether we have screenshot data
         if screenshot_data and status_code and status_code < 400:
             filename = f"site_{site_id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.png"
             print(f"💾 Saving screenshot as: {filename}")
             
-            # Use the new save_to_storage function
-            save_to_storage(snapshot, 'screenshot', filename, screenshot_data)
+            # Save the screenshot and the entire snapshot (status_code, content_length, etc.)
+            success = save_to_storage(snapshot, 'screenshot', filename, screenshot_data)
             
-            screenshot_saved = True
-            print(f"✅ Screenshot saved for snapshot {snapshot_id}")
-            
-            # ===== TRIGGER COMPARISON HERE =====
-            print("🔍 Triggering comparison job...")
-            from .tasks import create_comparison_task
-            comparison_job = create_comparison_task.delay(snapshot_id, site_id)
-            print(f"🚀 Enqueued comparison job: {comparison_job.id}")
-            # ====================================
-            score_job = calculate_site_score_task.delay(snapshot_id)
-            print(f"📊 Enqueued site score job: {score_job.id}")
-            print("⏳ Waiting for comparison and score jobs to complete...")
-            
-            from rq.job import Job
-            from django_rq import get_queue
-            import time
-            
-            queue = get_queue('default')
-            connection = queue.connection
-            
-            jobs_to_wait = []
-            if comparison_job:
-                jobs_to_wait.append(comparison_job.id)
-            if score_job:
-                jobs_to_wait.append(score_job.id)
-            
-            max_wait = 300  # 5 minutes total wait
-            waited = 0
-            completed = 0
-            
-            while waited < max_wait and completed < len(jobs_to_wait):
-                completed = 0
-                for job_id in jobs_to_wait:
-                    try:
-                        job = Job.fetch(job_id, connection=connection)
-                        status = job.get_status()
-                        if status in ['finished', 'failed']:
-                            completed += 1
-                    except:
-                        pass
+            if success:
+                screenshot_saved = True
+                print(f"✅ Screenshot saved for snapshot {snapshot_id}")
+                print(f"   HTTP Status: {snapshot.http_status_code}")
+                print(f"   Content Length: {snapshot.content_length}")
                 
-                if completed < len(jobs_to_wait):
-                    time.sleep(2)
-                    waited += 2
-            
-            # Check final status
-            if comparison_job:
-                try:
-                    job = Job.fetch(comparison_job.id, connection=connection)
-                    print(f"✅ Comparison job finished with status: {job.get_status()}")
-                except:
-                    print(f"⚠️ Could not fetch comparison job status")
-            
-            if score_job:
-                try:
-                    job = Job.fetch(score_job.id, connection=connection)
-                    print(f"✅ Score job finished with status: {job.get_status()}")
-                except:
-                    print(f"⚠️ Could not fetch score job status")
-            
+                # Trigger comparison and score jobs
+                print("🔍 Triggering comparison job...")
+                from .tasks import create_comparison_task
+                comparison_job = create_comparison_task.delay(snapshot_id, site_id)
+                print(f"🚀 Enqueued comparison job: {comparison_job.id}")
+                
+                score_job = calculate_site_score_task.delay(snapshot_id)
+                print(f"📊 Enqueued site score job: {score_job.id}")
+                
+            else:
+                # Screenshot save failed, but we still have status_code and content_length
+                snapshot.save()
+                print(f"⚠️ Snapshot {snapshot_id} saved without screenshot (status: {status_code})")
         else:
+            # No screenshot, just save status_code and content_length
             snapshot.save()
             print(f"⚠️ Snapshot {snapshot_id} saved without screenshot (status: {status_code})")
         
-        # Return result for dependent job
+        # Return result
         return {
             'snapshot_id': snapshot_id,
             'site_id': site_id,
             'screenshot_saved': screenshot_saved,
             'status_code': status_code,
-            'comparison_triggered': screenshot_saved  # Indicate if comparison was triggered
+            'content_length': content_length,
+            'comparison_triggered': screenshot_saved
         }
         
     except Exception as e:
@@ -322,10 +274,13 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
         print(f"🏁 Capture task finished for snapshot {snapshot_id}")
 
 
+# Keep the rest of your tasks (create_comparison_task, calculate_site_score_task, 
+# monitor_site_score_task, has_other_pending_monitoring, list_all_jobs) exactly as they are...
+
 @job('comparison', result_ttl=3600)
 def create_comparison_task(snapshot_id, site_id):
     """
-    Task 2: Create comparison with baseline snapshot
+    Task 2: Create comparison with baseline snapshot and upload results to remote storage
     """
     current_job = get_current_job()
     print(f"🔍 [Job {current_job.id}] Starting comparison for snapshot {snapshot_id}")
@@ -359,7 +314,6 @@ def create_comparison_task(snapshot_id, site_id):
         
         if not baseline_snapshot:
             print(f"📭 No baseline snapshot found for this site")
-            # If no baseline exists, make this the baseline if it's the first one
             if SiteSnapshot.objects.filter(site_id=site_id, screenshot__isnull=False).count() == 1:
                 current_snapshot.is_baseline = True
                 current_snapshot.save()
@@ -400,7 +354,7 @@ def create_comparison_task(snapshot_id, site_id):
         with tempfile.TemporaryDirectory() as temp_dir:
             print(f"📁 Created temp dir for comparison: {temp_dir}")
             
-            # Compare screenshots
+            # Compare screenshots - this will generate heatmap and diff images in temp_dir
             result = compare_screenshots(baseline_snapshot, current_snapshot, output_dir=temp_dir)
             
             if result.get('error'):
@@ -434,19 +388,27 @@ def create_comparison_task(snapshot_id, site_id):
             )
             print(f"✅ Created comparison ID: {comparison.id}")
             
-            # Save heatmap if generated
+            # Upload heatmap to remote storage if generated
             if result.get('heatmap_image_path') and os.path.exists(result['heatmap_image_path']):
+                print(f"📤 Uploading heatmap to remote storage...")
                 with open(result['heatmap_image_path'], 'rb') as f:
                     heatmap_data = f.read()
                 filename = f"heatmap_{baseline_snapshot.id}_vs_{current_snapshot.id}.png"
                 save_to_storage(comparison, 'heatmap', filename, heatmap_data)
+                print(f"✅ Heatmap uploaded: {comparison.heatmap.url if comparison.heatmap else 'Failed'}")
+            else:
+                print(f"⚠️ No heatmap generated")
             
-            # Save diff image if generated
+            # Upload diff image to remote storage if generated
             if result.get('diff_image_path') and os.path.exists(result['diff_image_path']):
+                print(f"📤 Uploading diff image to remote storage...")
                 with open(result['diff_image_path'], 'rb') as f:
                     diff_data = f.read()
                 filename = f"diff_{baseline_snapshot.id}_vs_{current_snapshot.id}.png"
                 save_to_storage(comparison, 'diff_image', filename, diff_data)
+                print(f"✅ Diff image uploaded: {comparison.diff_image.url if comparison.diff_image else 'Failed'}")
+            else:
+                print(f"⚠️ No diff image generated")
             
             print(f"✅ Comparison with baseline completed for snapshot {snapshot_id}")
             
@@ -456,7 +418,9 @@ def create_comparison_task(snapshot_id, site_id):
                 'comparison_id': comparison.id,
                 'ssim_score': result['ssim_score'],
                 'percent_difference': result['percent_difference'],
-                'baseline_id': baseline_snapshot.id
+                'baseline_id': baseline_snapshot.id,
+                'heatmap_uploaded': bool(comparison.heatmap),
+                'diff_uploaded': bool(comparison.diff_image)
             }
             
     except Exception as e:
