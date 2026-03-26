@@ -1,0 +1,29 @@
+[Unit]
+Description=RQ Worker Number %i
+After=multi-user.target
+
+[Service]
+User=httpcodechecker
+Group=httpcodechecker
+WorkingDirectory=/home/httpcodechecker/http-code-checker
+ExecStart = /home/httpcodechecker/.local/bin/uv run /home/httpcodechecker/http-code-checker/manage.py rqworker default  --with-scheduler
+Restart = always
+Type = simple
+
+[Install]
+WantedBy=multi-user.target
+[root@dontdeletezoltan ~]# cat /etc/systemd/system/rq@.service
+[Unit]
+Description=RQ Worker Number %i
+After=multi-user.target
+
+[Service]
+User=httpcodechecker
+Group=httpcodechecker
+WorkingDirectory=/home/httpcodechecker/http-code-checker
+ExecStart = /home/httpcodechecker/.local/bin/uv run /home/httpcodechecker/http-code-checker/manage.py rqworker comparison scoring  monitoring --with-scheduler
+Restart = always
+Type = simple
+
+[Install]
+WantedBy=multi-user.target
