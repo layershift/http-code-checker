@@ -26,6 +26,9 @@ usage() {
     echo "  --make-all-baseline-snapshots      Create snapshots for all domains and set as baseline"
     echo "  --report DOMAIN                    Generate report for specific domain"
     echo "  --report-all                       Generate server report"
+    echo "  --delete-domain DOMAIN             Delete domain and all associated files"
+    echo "  --delete-server                    Delete this server and all associated files"
+    echo "  --delete-snapshot ID               Delete snapshot by ID and its associated file"
     echo "  --help                             Show this help message"
     echo ""
     echo "Optional ticket parameter:"
@@ -223,6 +226,57 @@ main() {
                 -H "Content-Type: application/json" \
                 -d "$PAYLOAD"
             echo ""
+            ;;
+
+        --delete-domain)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Domain name required${NC}"
+                usage
+                exit 1
+            fi
+            echo -e "${RED}⚠️  WARNING: This will delete domain $2 and ALL associated files!${NC}"
+            echo -e "${YELLOW}Are you sure? Type 'yes' to confirm: ${NC}"
+            read -r confirmation
+            if [ "$confirmation" = "yes" ]; then
+                echo -e "${BLUE}Deleting domain: $2 and all associated files...${NC}"
+                curl -X DELETE "${BASE_URL}/sites/$2/delete/"
+                echo ""
+            else
+                echo -e "${RED}Deletion cancelled${NC}"
+            fi
+            ;;
+
+        --delete-server)
+            echo -e "${RED}⚠️  WARNING: This will delete server $HOSTNAME and ALL associated domains, snapshots, comparisons, and files!${NC}"
+            echo -e "${YELLOW}Are you sure? Type 'yes' to confirm: ${NC}"
+            read -r confirmation
+            if [ "$confirmation" = "yes" ]; then
+                echo -e "${BLUE}Deleting server: $HOSTNAME and all associated files...${NC}"
+                # URL encode the server name (replace spaces with %20)
+                ENCODED_SERVER=$(echo "$HOSTNAME" | sed 's/ /%20/g')
+                curl -X DELETE "${BASE_URL}/servers/$ENCODED_SERVER/delete/"
+                echo ""
+            else
+                echo -e "${RED}Deletion cancelled${NC}"
+            fi
+            ;;
+
+        --delete-snapshot)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Snapshot ID required${NC}"
+                usage
+                exit 1
+            fi
+            echo -e "${RED}⚠️  WARNING: This will delete snapshot $2 and its associated file!${NC}"
+            echo -e "${YELLOW}Are you sure? Type 'yes' to confirm: ${NC}"
+            read -r confirmation
+            if [ "$confirmation" = "yes" ]; then
+                echo -e "${BLUE}Deleting snapshot: $2 and its associated file...${NC}"
+                curl -X DELETE "${BASE_URL}/snapshots/$2/delete/"
+                echo ""
+            else
+                echo -e "${RED}Deletion cancelled${NC}"
+            fi
             ;;
 
         --help)
