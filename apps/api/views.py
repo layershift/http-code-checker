@@ -2379,7 +2379,51 @@ def serve_bash_script(request, script):
     except Exception as e:
         return HttpResponse(f"Error reading file: {e}", status=500)
 
-
+@extend_schema(
+    methods=['POST'],
+    description="Set an existing snapshot as the new baseline for its site. This will automatically unset any previous baseline for the same site.",
+    summary="Set Snapshot as Baseline",
+    parameters=[
+        OpenApiParameter(
+            name='snapshot_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='ID of the snapshot to set as baseline',
+            required=True,
+            example=12345
+        ),
+    ],
+    request=None,
+    responses={
+        200: OpenApiResponse(
+            description="Snapshot set as baseline successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string', 'example': 'Snapshot 12345 set as baseline'}
+                }
+            },
+            examples=[
+                OpenApiExample(
+                    'Success Response',
+                    value={'status': 'success', 'message': 'Snapshot 12345 set as baseline'}
+                )
+            ]
+        ),
+        404: OpenApiResponse(
+            description="Snapshot not found",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string', 'example': 'Snapshot 12345 not found'}
+                }
+            }
+        ),
+    },
+    tags=['snapshots'],
+)
 @api_view(['POST'])
 @ip_allow(mode='all')
 def set_snapshot_baseline(request, snapshot_id):
