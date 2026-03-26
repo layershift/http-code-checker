@@ -810,6 +810,7 @@ def handle_sites(request):
             # Check if we have names list or single name
             names = data.get('names')
             single_name = data.get('name')
+            single_ip = data.get('ip')
             
             if not names and not single_name:
                 return JsonResponse({
@@ -819,7 +820,7 @@ def handle_sites(request):
             
             # Convert single name to list for uniform processing
             if single_name:
-                names = [single_name]
+                names = [(single_name, single_ip)]
             
             # Validate names is a list
             if not isinstance(names, list):
@@ -873,7 +874,7 @@ def handle_sites(request):
             
             # Process each site name
             with transaction.atomic():
-                for site_name in names:
+                for site_name, site_ip in names:
                     site_name = site_name.lower().strip()
                     
                     # Check if site already exists
@@ -891,7 +892,7 @@ def handle_sites(request):
                         site = Site.objects.create(
                             name=site_name,
                             server=server,
-                            server_ip=data.get('server_ip'),
+                            server_ip=site_ip if site_ip else None,
                             is_active=data.get('is_active', True)
                         )
                         
