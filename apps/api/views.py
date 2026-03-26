@@ -2179,10 +2179,6 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         monitoring_text += "| --- | --- | --- | --- | --- | ---\n"
         monitoring_text += "\n".join(warning_lines)
     
-    # If nothing to report, don't send notification
-    if not fail_lines and not warning_lines:
-        print(f"📭 No issues detected for {target_name}. Skipping notification.")
-        return
     
     # Prepare the full message
     if target_type == 'server':
