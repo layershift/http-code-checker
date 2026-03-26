@@ -2408,6 +2408,35 @@ def set_snapshot_baseline(request, snapshot_id):
         }, status=404)
 
 
+@extend_schema(
+    methods=['DELETE'],
+    description="Permanently delete a site and all its associated files from remote storage. This will also delete all snapshots, comparisons, and scores for this site.",
+    summary="Delete Site by Name",
+    parameters=[
+        OpenApiParameter(
+            name='site_name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Domain name of the site to delete',
+            required=True,
+            example='example.com'
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Site deleted successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+        404: OpenApiResponse(description="Site not found"),
+    },
+    tags=['sites'],
+)
 @api_view(['DELETE'])
 @ip_allow(mode='all')
 def delete_site_by_name(request, site_name):
@@ -2441,6 +2470,35 @@ def delete_site_by_name(request, site_name):
         }, status=500)
 
 
+@extend_schema(
+    methods=['DELETE'],
+    description="Permanently delete a server and all its associated sites, snapshots, comparisons, and files from remote storage.",
+    summary="Delete Server by Name",
+    parameters=[
+        OpenApiParameter(
+            name='server_name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Name of the server to delete (URL-encode spaces)',
+            required=True,
+            example='Web%20Server%201'
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Server deleted successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+        404: OpenApiResponse(description="Server not found"),
+    },
+    tags=['servers'],
+)
 @api_view(['DELETE'])
 @ip_allow(mode='all')
 def delete_server_by_name(request, server_name):
@@ -2477,6 +2535,35 @@ def delete_server_by_name(request, server_name):
         }, status=500)
 
 
+@extend_schema(
+    methods=['DELETE'],
+    description="Permanently delete a snapshot and its associated screenshot file from remote storage.",
+    summary="Delete Snapshot by ID",
+    parameters=[
+        OpenApiParameter(
+            name='snapshot_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='ID of the snapshot to delete',
+            required=True,
+            example=12345
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Snapshot deleted successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+        404: OpenApiResponse(description="Snapshot not found"),
+    },
+    tags=['snapshots'],
+)
 @api_view(['DELETE'])
 @ip_allow(mode='all')
 def delete_snapshot_by_id(request, snapshot_id):
