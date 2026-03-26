@@ -2390,7 +2390,7 @@ def serve_bash_script(request, script):
             location=OpenApiParameter.PATH,
             description='ID of the snapshot to set as baseline',
             required=True,
-            example=12345
+            examples=[12345]
         ),
     ],
     request=None,
@@ -2403,13 +2403,7 @@ def serve_bash_script(request, script):
                     'status': {'type': 'string', 'example': 'success'},
                     'message': {'type': 'string', 'example': 'Snapshot 12345 set as baseline'}
                 }
-            },
-            examples=[
-                OpenApiExample(
-                    'Success Response',
-                    value={'status': 'success', 'message': 'Snapshot 12345 set as baseline'}
-                )
-            ]
+            }
         ),
         404: OpenApiResponse(
             description="Snapshot not found",
@@ -2418,6 +2412,16 @@ def serve_bash_script(request, script):
                 'properties': {
                     'status': {'type': 'string', 'example': 'error'},
                     'message': {'type': 'string', 'example': 'Snapshot 12345 not found'}
+                }
+            }
+        ),
+        500: OpenApiResponse(
+            description="Internal server error",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string'}
                 }
             }
         ),
@@ -2463,7 +2467,7 @@ def set_snapshot_baseline(request, snapshot_id):
             location=OpenApiParameter.PATH,
             description='Domain name of the site to delete',
             required=True,
-            example='example.com'
+            examples=['example.com']
         ),
     ],
     responses={
@@ -2525,7 +2529,7 @@ def delete_site_by_name(request, site_name):
             location=OpenApiParameter.PATH,
             description='Name of the server to delete (URL-encode spaces)',
             required=True,
-            example='Web%20Server%201'
+            examples=['Web%20Server%201']
         ),
     ],
     responses={
@@ -2590,7 +2594,7 @@ def delete_server_by_name(request, server_name):
             location=OpenApiParameter.PATH,
             description='ID of the snapshot to delete',
             required=True,
-            example=12345
+            examples=[12345]
         ),
     ],
     responses={
