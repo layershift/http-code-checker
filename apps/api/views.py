@@ -2406,3 +2406,105 @@ def set_snapshot_baseline(request, snapshot_id):
             'status': 'error',
             'message': f'Snapshot {snapshot_id} not found'
         }, status=404)
+
+
+@api_view(['DELETE'])
+@ip_allow(mode='all')
+def delete_site_by_name(request, site_name):
+    """
+    Delete a site by name and all its associated remote files
+    DELETE /api/v1/sites/example.com/delete/
+    """
+    try:
+        from apps.monitoring.models import Site
+        
+        site = Site.objects.get(name=site_name.lower().strip())
+        site_name_deleted = site.name
+        
+        # The pre_delete signal will handle file cleanup
+        site.delete()
+        
+        return Response({
+            'status': 'success',
+            'message': f'Site "{site_name_deleted}" and all associated files deleted successfully'
+        })
+        
+    except Site.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': f'Site "{site_name}" not found'
+        }, status=404)
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+
+@api_view(['DELETE'])
+@ip_allow(mode='all')
+def delete_server_by_name(request, server_name):
+    """
+    Delete a server by name and all its associated remote files
+    DELETE /api/v1/servers/Web%20Server%201/delete/
+    """
+    try:
+        from apps.monitoring.models import Server
+        
+        server = Server.objects.get(name=server_name)
+        server_name_deleted = server.name
+        
+        # Count sites before deletion
+        sites_count = server.domains.count()
+        
+        # The pre_delete signal will handle file cleanup for all sites
+        server.delete()
+        
+        return Response({
+            'status': 'success',
+            'message': f'Server "{server_name_deleted}" and {sites_count} site(s) with all associated files deleted successfully'
+        })
+        
+    except Server.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': f'Server "{server_name}" not found'
+        }, status=404)
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+
+@api_view(['DELETE'])
+@ip_allow(mode='all')
+def delete_snapshot_by_id(request, snapshot_id):
+    """
+    Delete a snapshot by ID and its remote file
+    DELETE /api/v1/snapshots/123/delete/
+    """
+    try:
+        from apps.monitoring.models import SiteSnapshot
+        
+        snapshot = SiteSnapshot.objects.get(id=snapshot_id)
+        snapshot_id_deleted = snapshot.id
+        
+        # The model's delete() method handles file cleanup
+        snapshot.delete()
+        
+        return Response({
+            'status': 'success',
+            'message': f'Snapshot {snapshot_id_deleted} and its associated file deleted successfully'
+        })
+        
+    except SiteSnapshot.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': f'Snapshot {snapshot_id} not found'
+        }, status=404)
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)

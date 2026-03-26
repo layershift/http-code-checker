@@ -8,6 +8,8 @@ import socket
 from django.urls import reverse
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.files.storage import default_storage
+from django.db.models.signals import pre_delete
+from django.dispatch import receiver
 import requests
 import logging
 
@@ -367,3 +369,53 @@ class SiteScore(models.Model):
     
     def __str__(self):
         return f"{self.site.name} - {self.overall_score} - {self.calculated_at}"
+
+
+# ===== SIGNALS FOR CASCADE DELETES =====
+# These signals ensure remote files are deleted even when objects are deleted via cascade
+
+@receiver(pre_delete, sender=SiteSnapshot)
+def delete_snapshot_files_signal(sender, instance, **kwargs):
+    """
+    Delete remote file when a snapshot is deleted (even via cascade)
+    This works alongside the delete() method for double coverage
+    """
+    file_id = instance.screenshot.name if instance.screenshot else None
+    if file_id:
+        delete_remote_file(file_id)
+
+
+@receiver(pre_delete, sender=ScreenshotComparison)
+def delete_comparison_files_signal(sender, instance, **kwargs):
+    """
+    Delete remote files when a comparison is deleted (even via cascade)
+    This works alongside the delete() method for double coverage
+    """
+    heatmap_id = instance.heatmap.name if instance.heatmap else None
+    diff_id = instance.diff_image.name if instance.diff_image else None
+    
+    if heatmap_id:
+        delete_remote_file(heatmap_id)
+    if diff_id:
+        delete_remote_file(diff_id)
+
+
+@receiver(pre_delete, sender=Site)
+def delete_site_files_signal(sender, instance, **kwargs):
+    """
+    Log when a site is deleted.
+    Snapshots and comparisons will trigger their own signals via cascade.
+    """
+    print(f"🗑️ Deleting site: {instance.name} - {instance.snapshots.count()} snapshots, {instance.comparisons.count()} comparisons")
+    # No need to manually delete files - the pre_delete signals for snapshots/comparisons will handle it
+
+
+@receiver(pre_delete, sender=Server)
+def delete_server_files_signal(sender, instance, **kwargs):
+    """
+    Log when a server is deleted.
+    Cascade will trigger site deletion, which triggers snapshot/comparison deletion.
+    """
+    sites_count = instance.domains.count()
+    print(f"🗑️ Deleting server: {instance.name} with {sites_count} sites")
+    # No need to manually delete files - cascade will trigger site deletion, which triggers snapshot/comparison deletion
