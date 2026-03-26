@@ -2390,10 +2390,8 @@ def serve_bash_script(request, script):
             location=OpenApiParameter.PATH,
             description='ID of the snapshot to set as baseline',
             required=True,
-            examples=[12345]
         ),
     ],
-    request=None,
     responses={
         200: OpenApiResponse(
             description="Snapshot set as baseline successfully",
@@ -2401,7 +2399,7 @@ def serve_bash_script(request, script):
                 'type': 'object',
                 'properties': {
                     'status': {'type': 'string', 'example': 'success'},
-                    'message': {'type': 'string', 'example': 'Snapshot 12345 set as baseline'}
+                    'message': {'type': 'string', 'example': 'Snapshot 123 set as baseline'}
                 }
             }
         ),
@@ -2411,7 +2409,7 @@ def serve_bash_script(request, script):
                 'type': 'object',
                 'properties': {
                     'status': {'type': 'string', 'example': 'error'},
-                    'message': {'type': 'string', 'example': 'Snapshot 12345 not found'}
+                    'message': {'type': 'string', 'example': 'Snapshot 123 not found'}
                 }
             }
         ),
@@ -2465,9 +2463,8 @@ def set_snapshot_baseline(request, snapshot_id):
             name='site_name',
             type=OpenApiTypes.STR,
             location=OpenApiParameter.PATH,
-            description='Domain name of the site to delete',
+            description='Domain name of the site to delete (e.g., example.com)',
             required=True,
-            examples=['example.com']
         ),
     ],
     responses={
@@ -2477,11 +2474,30 @@ def set_snapshot_baseline(request, snapshot_id):
                 'type': 'object',
                 'properties': {
                     'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string', 'example': 'Site "example.com" and all associated files deleted successfully'}
+                }
+            }
+        ),
+        404: OpenApiResponse(
+            description="Site not found",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string', 'example': 'Site "example.com" not found'}
+                }
+            }
+        ),
+        500: OpenApiResponse(
+            description="Internal server error",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
                     'message': {'type': 'string'}
                 }
             }
         ),
-        404: OpenApiResponse(description="Site not found"),
     },
     tags=['sites'],
 )
@@ -2529,7 +2545,6 @@ def delete_site_by_name(request, site_name):
             location=OpenApiParameter.PATH,
             description='Name of the server to delete (URL-encode spaces)',
             required=True,
-            examples=['Web%20Server%201']
         ),
     ],
     responses={
@@ -2539,11 +2554,30 @@ def delete_site_by_name(request, site_name):
                 'type': 'object',
                 'properties': {
                     'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string', 'example': 'Server "Web Server 1" and 5 site(s) with all associated files deleted successfully'}
+                }
+            }
+        ),
+        404: OpenApiResponse(
+            description="Server not found",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string', 'example': 'Server "Web Server 1" not found'}
+                }
+            }
+        ),
+        500: OpenApiResponse(
+            description="Internal server error",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
                     'message': {'type': 'string'}
                 }
             }
         ),
-        404: OpenApiResponse(description="Server not found"),
     },
     tags=['servers'],
 )
@@ -2594,7 +2628,6 @@ def delete_server_by_name(request, server_name):
             location=OpenApiParameter.PATH,
             description='ID of the snapshot to delete',
             required=True,
-            examples=[12345]
         ),
     ],
     responses={
@@ -2604,11 +2637,30 @@ def delete_server_by_name(request, server_name):
                 'type': 'object',
                 'properties': {
                     'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string', 'example': 'Snapshot 12345 and its associated file deleted successfully'}
+                }
+            }
+        ),
+        404: OpenApiResponse(
+            description="Snapshot not found",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string', 'example': 'Snapshot 12345 not found'}
+                }
+            }
+        ),
+        500: OpenApiResponse(
+            description="Internal server error",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
                     'message': {'type': 'string'}
                 }
             }
         ),
-        404: OpenApiResponse(description="Snapshot not found"),
     },
     tags=['snapshots'],
 )
