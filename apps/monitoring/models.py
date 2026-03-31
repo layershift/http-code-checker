@@ -1,12 +1,31 @@
+# monitoring/models.py
 from django.db import models
 from django.core.validators import validate_ipv46_address
-from django.db import models
-import ipaddress
+from django.conf import settings
 from django.utils import timezone
 import os 
 import socket
 from django.urls import reverse
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.files.storage import default_storage
+from django.db.models.signals import pre_delete
+from django.dispatch import receiver
+import requests
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Import storage class for remote upload
+if getattr(settings, 'REMOTE_UPLOADER_ENABLED', False):
+    try:
+        from .storage import RemoteUploaderStorage
+        remote_storage = RemoteUploaderStorage()
+        print(f"✅ Using remote storage: {remote_storage}")
+    except Exception as e:
+        print(f"⚠️ Failed to load remote storage: {e}, falling back to default")
+        remote_storage = default_storage
+else:
+    remote_storage = default_storage
 
 def screenshot_upload_path(instance, filename):
     """
@@ -81,7 +100,7 @@ class Site(models.Model):
 
     monitoring_frequency = models.PositiveIntegerField(
         default=3,
-        validators=[MinValueValidator(1), MaxValueValidator(1440)],  # Min 1 minute, Max 24 hours
+        validators=[MinValueValidator(1), MaxValueValidator(1440)],
         help_text="Monitoring frequency in minutes (1-1440)"
     )
 
@@ -100,12 +119,8 @@ class Site(models.Model):
         Resolve the IPv4 address of the site
         """
         try:
-            # Get all IP addresses
             ip_list = socket.gethostbyname_ex(self.name)[2]
-            
-            # Filter for IPv4 addresses (they're already IPv4 from gethostbyname_ex)
             if ip_list:
-                # Store the first IPv4 address
                 self.resolved_ip = ip_list[0]
                 return self.resolved_ip
             else:
@@ -117,14 +132,47 @@ class Site(models.Model):
             print(f"Error resolving IP for {self.name}: {e}")
             return None
     
-    
-        
     def get_absolute_url(self):
-        """Return the URL to access this specific site"""
         return reverse('site_detail', args=[str(self.id)])
     
     def __str__(self):
         return self.name
+
+
+def delete_remote_file(file_id):
+    """
+    Helper function to delete a file from remote storage
+    Endpoint: DELETE /files/{file_id}?force=true
+    """
+    if not file_id or not getattr(settings, 'REMOTE_UPLOADER_ENABLED', False):
+        return True
+    
+    try:
+        uploader_url = settings.REMOTE_UPLOADER_URL
+        # Correct endpoint: /files/{file_id}?force=true
+        delete_url = f"{uploader_url}/files/{file_id}?force=true"
+        
+        print(f"🗑️ Deleting remote file: {delete_url}")
+        
+        response = requests.delete(delete_url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Successfully deleted remote file: {file_id} - {data.get('message', '')}")
+            return True
+        elif response.status_code == 404:
+            print(f"⚠️ Remote file not found (already deleted): {file_id}")
+            return True
+        else:
+            print(f"⚠️ Failed to delete remote file {file_id}: HTTP {response.status_code} - {response.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network error deleting remote file {file_id}: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Error deleting remote file {file_id}: {e}")
+        return False
+
 
 class SiteSnapshot(models.Model):
     """
@@ -141,7 +189,8 @@ class SiteSnapshot(models.Model):
         upload_to=screenshot_upload_path, 
         null=True, 
         blank=True,
-        max_length=500
+        max_length=500,
+        storage=remote_storage
     )
 
     http_status_code = models.PositiveIntegerField(null=True, blank=True)
@@ -154,7 +203,6 @@ class SiteSnapshot(models.Model):
 
     ticket = models.CharField(max_length=320, null=True, blank=True)
         
-    # NEW: Baseline field
     is_baseline = models.BooleanField(
         default=False,
         help_text="If True, this is the baseline snapshot for comparisons"
@@ -162,7 +210,6 @@ class SiteSnapshot(models.Model):
 
     class Meta:
         ordering = ['-taken_at']
-        # Ensure only one baseline per site
         constraints = [
             models.UniqueConstraint(
                 fields=['site', 'is_baseline'],
@@ -176,15 +223,23 @@ class SiteSnapshot(models.Model):
         return f"{self.site.name} - {self.taken_at}{baseline}"
 
     def save(self, *args, **kwargs):
-        """Override save to handle baseline logic"""
         if self.is_baseline:
-            # If this is being set as baseline, remove baseline from all other snapshots of this site
             SiteSnapshot.objects.filter(site=self.site, is_baseline=True).exclude(pk=self.pk).update(is_baseline=False)
         super().save(*args, **kwargs)
 
+    def delete(self, *args, **kwargs):
+        """Delete the associated remote screenshot file before deleting the database record."""
+        # Store the file_id before deleting the object
+        file_id = self.screenshot.name if self.screenshot else None
+        
+        # Delete the database record
+        super().delete(*args, **kwargs)
+        
+        # Delete the remote file
+        if file_id:
+            delete_remote_file(file_id)
 
 
-# models.py - Add this new model
 class ScreenshotComparison(models.Model):
     """
     Links two consecutive screenshots to track changes between monitoring runs
@@ -207,7 +262,6 @@ class ScreenshotComparison(models.Model):
         related_name="previous_comparisons"
     )
 
-    # Comparison metrics
     ssim_score = models.FloatField(
         null=True,
         blank=True,
@@ -236,24 +290,43 @@ class ScreenshotComparison(models.Model):
         upload_to='comparisons/heatmaps/',
         null=True,
         blank=True,
-        help_text="Visual heatmap showing changes"
+        help_text="Visual heatmap showing changes",
+        storage=remote_storage
     )
 
     diff_image = models.ImageField(
         upload_to='comparisons/diffs/',
         null=True,
         blank=True,
-        help_text="Difference image highlighting changes"
+        help_text="Difference image highlighting changes",
+        storage=remote_storage
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
-        unique_together = ['previous_snapshot', 'current_snapshot']  # Prevent duplicates
+        unique_together = ['previous_snapshot', 'current_snapshot']
 
     def __str__(self):
         return f"{self.site.name} - {self.previous_snapshot.taken_at} vs {self.current_snapshot.taken_at} (SSIM: {self.ssim_score:.3f})"
+
+    def delete(self, *args, **kwargs):
+        """Delete associated remote files (heatmap and diff) before deleting the database record."""
+        # Store file IDs before deletion
+        heatmap_id = self.heatmap.name if self.heatmap else None
+        diff_id = self.diff_image.name if self.diff_image else None
+        
+        # Delete the database record
+        super().delete(*args, **kwargs)
+        
+        # Delete remote files
+        if heatmap_id:
+            delete_remote_file(heatmap_id)
+        
+        if diff_id:
+            delete_remote_file(diff_id)
+
 
 class SiteScore(models.Model):
     """
@@ -272,24 +345,20 @@ class SiteScore(models.Model):
         related_name="score"
     )
     
-    # Score components (normalized 0-100)
     performance_score = models.FloatField(null=True, blank=True)
     seo_score = models.FloatField(null=True, blank=True)
     security_score = models.FloatField(null=True, blank=True)
     availability_score = models.FloatField(null=True, blank=True)
     content_quality_score = models.FloatField(null=True, blank=True)
     
-    # Overall composite score (weighted average)
     overall_score = models.FloatField(null=True, blank=True)
     
-    # Raw metrics that feed into scores
     page_load_time_ms = models.IntegerField(null=True, blank=True)
     ttfb_ms = models.IntegerField(null=True, blank=True)
     content_size_kb = models.IntegerField(null=True, blank=True)
     has_ssl = models.BooleanField(default=False)
     has_security_headers = models.BooleanField(default=False)
     
-    # Metadata
     calculated_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -300,3 +369,53 @@ class SiteScore(models.Model):
     
     def __str__(self):
         return f"{self.site.name} - {self.overall_score} - {self.calculated_at}"
+
+
+# ===== SIGNALS FOR CASCADE DELETES =====
+# These signals ensure remote files are deleted even when objects are deleted via cascade
+
+@receiver(pre_delete, sender=SiteSnapshot)
+def delete_snapshot_files_signal(sender, instance, **kwargs):
+    """
+    Delete remote file when a snapshot is deleted (even via cascade)
+    This works alongside the delete() method for double coverage
+    """
+    file_id = instance.screenshot.name if instance.screenshot else None
+    if file_id:
+        delete_remote_file(file_id)
+
+
+@receiver(pre_delete, sender=ScreenshotComparison)
+def delete_comparison_files_signal(sender, instance, **kwargs):
+    """
+    Delete remote files when a comparison is deleted (even via cascade)
+    This works alongside the delete() method for double coverage
+    """
+    heatmap_id = instance.heatmap.name if instance.heatmap else None
+    diff_id = instance.diff_image.name if instance.diff_image else None
+    
+    if heatmap_id:
+        delete_remote_file(heatmap_id)
+    if diff_id:
+        delete_remote_file(diff_id)
+
+
+@receiver(pre_delete, sender=Site)
+def delete_site_files_signal(sender, instance, **kwargs):
+    """
+    Log when a site is deleted.
+    Snapshots and comparisons will trigger their own signals via cascade.
+    """
+    print(f"🗑️ Deleting site: {instance.name} - {instance.snapshots.count()} snapshots, {instance.comparisons.count()} comparisons")
+    # No need to manually delete files - the pre_delete signals for snapshots/comparisons will handle it
+
+
+@receiver(pre_delete, sender=Server)
+def delete_server_files_signal(sender, instance, **kwargs):
+    """
+    Log when a server is deleted.
+    Cascade will trigger site deletion, which triggers snapshot/comparison deletion.
+    """
+    sites_count = instance.domains.count()
+    print(f"🗑️ Deleting server: {instance.name} with {sites_count} sites")
+    # No need to manually delete files - cascade will trigger site deletion, which triggers snapshot/comparison deletion

@@ -810,6 +810,7 @@ def handle_sites(request):
             # Check if we have names list or single name
             names = data.get('names')
             single_name = data.get('name')
+            single_ip = data.get('ip')
             
             if not names and not single_name:
                 return JsonResponse({
@@ -819,7 +820,7 @@ def handle_sites(request):
             
             # Convert single name to list for uniform processing
             if single_name:
-                names = [single_name]
+                names = [(single_name, single_ip)]
             
             # Validate names is a list
             if not isinstance(names, list):
@@ -873,7 +874,7 @@ def handle_sites(request):
             
             # Process each site name
             with transaction.atomic():
-                for site_name in names:
+                for site_name, site_ip in names:
                     site_name = site_name.lower().strip()
                     
                     # Check if site already exists
@@ -891,7 +892,7 @@ def handle_sites(request):
                         site = Site.objects.create(
                             name=site_name,
                             server=server,
-                            server_ip=data.get('server_ip'),
+                            server_ip=site_ip if site_ip else None,
                             is_active=data.get('is_active', True)
                         )
                         
@@ -2029,6 +2030,8 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     from datetime import datetime
     import time
     from apps.monitoring.util.evaluator import SiteEvaluator
+    from apps.monitoring.models import SiteSnapshot
+    import os
     
     queue = get_queue('default')
     connection = queue.connection
@@ -2093,9 +2096,11 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     target_name = target.get('name', 'Unknown')
     target_type = target.get('type', 'target')
     
-    # Build monitoring results using SiteEvaluator
-    monitoring_lines = []
-    all_pass = True
+    # Build monitoring results - ONLY include warnings and fails
+    warning_lines = []
+    fail_lines = []
+    status_changed = False
+    ssim_warning = False
     
     for site_info in sites_data:
         site_name = site_info['name']
@@ -2104,72 +2109,139 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         if evaluator.is_valid():
             passed, text = evaluator.get_monitoring_text(compact=False)
             print(f"✅ Evaluated {site_name}: {'PASS' if passed else 'FAIL'} {text}")
-            #monitoring_lines.append(text)
-            if not passed:
-                monitoring_lines.append(text)
-                all_pass = False
+            
+            # Check status code change
+            baseline_snapshot = evaluator.baseline_snapshot
+            latest_snapshot = evaluator.site.snapshots.first()
+            
+            baseline_status = None
+            latest_status = None
+            status_unchanged = True
+            ssim_bad = False
+            
+            # Check status code change
+            if baseline_snapshot and latest_snapshot:
+                baseline_status = baseline_snapshot.http_status_code
+                latest_status = latest_snapshot.http_status_code
+                if baseline_status != latest_status:
+                    status_unchanged = False
+                    status_changed = True
+            
+            # Check SSIM if available
+            if evaluator.has_comparison() and evaluator.latest_comparison:
+                ssim = evaluator.latest_comparison.ssim_score
+                if ssim is not None and ssim < 0.90:
+                    ssim_bad = True
+                    ssim_warning = True
+            
+            # Parse the text to get the values
+            parts = text.split('|')
+            if len(parts) >= 6:
+                site_link = parts[1].strip()
+                status_part = parts[2].strip()
+                ssim_part = parts[3].strip()
+                score_part = parts[4].strip()
+                change_part = parts[5].strip()
+            else:
+                site_link = site_name
+                status_part = "-"
+                ssim_part = "-"
+                score_part = "-"
+                change_part = "-"
+            
+            # ONLY add to output if there's an issue
+            if not status_unchanged:
+                # Status code changed -> FAIL
+                formatted_line = f"| ❌ | {site_link} | {status_part} | {ssim_part} | {score_part} | {change_part} |"
+                fail_lines.append(formatted_line)
+            elif ssim_bad:
+                # Status unchanged but SSIM bad -> WARNING
+                formatted_line = f"| ⚠️ | {site_link} | {status_part} | {ssim_part} | {score_part} | {change_part} |"
+                warning_lines.append(formatted_line)
+            # If everything is fine, don't add anything
+            
         else:
-            monitoring_lines.append(f"| {site_name} | Error: {evaluator.error}")
-            all_pass = False
+            # Failed evaluation
+            formatted_line = f"| ❌ {site_name} | Error: {evaluator.error} | - | - | - |"
+            fail_lines.append(formatted_line)
+            status_changed = True
     
     # Combine all monitoring texts
-    if target_type == 'server':
-        # For servers, concatenate all texts with newlines
-        monitoring_text = "\n".join(monitoring_lines)
-    else:
-        # For single domain, just use the first text
-        print(monitoring_lines)
-        if len (monitoring_lines) == 0:
-            print("Everything is ok")
-            monitoring_text = f"| {target_name} | ✅ | ✅ | ✅ | ✅"
-        else:
-            monitoring_text = monitoring_lines[0] if monitoring_lines else "No monitoring data available"
+    monitoring_text = ""
+    if fail_lines:
+        monitoring_text += "\n\n❌ **FAILURES (Status Changes)**\n"
+        monitoring_text += "\n| Status | Site Name | Status | SSIM | Score | Change |\n"
+        monitoring_text += "| --- | --- | --- | --- | --- | ---\n"
+        monitoring_text += "\n".join(fail_lines)
+    
+    if warning_lines:
+        monitoring_text += "\n\n⚠️ **WARNINGS (Visual Changes)**\n"
+        monitoring_text += "\n| Status | Site Name | Status | SSIM | Score | Change |\n"
+        monitoring_text += "| --- | --- | --- | --- | --- | ---\n"
+        monitoring_text += "\n".join(warning_lines)
+    
     
     # Prepare the full message
     if target_type == 'server':
-        header = f"📊 Monitoring Results for Server: {target_name}"
+        header = f"📊 Monitoring Report for Server: {target_name}"
     else:
-        header = f"📊 Monitoring Results for Domain: {target_name}"
+        header = f"📊 Monitoring Report for Domain: {target_name}"
 
-    status_emoji = "✅" if all_pass else "⚠️"
+    # Determine overall status emoji
+    if status_changed:
+        overall_emoji = "❌"
+        overall_status_text = "FAILURES DETECTED"
+    elif ssim_warning:
+        overall_emoji = "⚠️"
+        overall_status_text = "WARNINGS DETECTED"
+    else:
+        overall_emoji = "✅"
+        overall_status_text = "PASS"
 
     full_message = (
         f"{header}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Sites: {len(sites_data)} | Jobs: {total_jobs} | Duration: {duration:.1f}s\n"
-        f"Overall Status: {status_emoji} {'PASS' if all_pass else 'FAIL'}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━"
+        f"Sites: {len(sites_data)} | Duration: {duration:.1f}s\n"
+        f"Overall Status: {overall_emoji} {overall_status_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
     )
+    
+    full_message += monitoring_text
+    full_message += f"\n\n━━━━━━━━━━━━━━━━━━━━━━━\n"
 
-    if not all_pass:
-        table = (
-            f"\n\n| Site Name | Status | SSIM | Score | Change \n"
-            f"| --- | --- | --- | --- | --- \n"
-            f"{monitoring_text}\n"
-        )
-        full_message += table
-        full_message += f"\n\n━━━━━━━━━━━━━━━━━━━━━━━"
-
-    print(f"Site: {site_name}, Ticket ID: --------------------------")
-    ticket_id=SiteSnapshot.objects.filter(site__name=site_name).first()
-    if ticket_id is not None:
-        ticket_id = ticket_id.ticket
-    else:
-        ticket_id = "No Ticket ID"
-    print(f"Site: {site_name}, Ticket ID: {ticket_id} --------------------------")
+    # Get ticket ID
+    ticket_id = "No Ticket ID"
+    if sites_data:
+        first_site_name = sites_data[0]['name']
+        first_snapshot = SiteSnapshot.objects.filter(site__name=first_site_name).first()
+        if first_snapshot and first_snapshot.ticket:
+            ticket_id = first_snapshot.ticket
+    
+    print(f"Ticket ID: {ticket_id}")
+    
     # Send notification
     try:
+        from apps.monitoring.utils import Notify
+        
+        # Determine notification title prefix
+        if status_changed:
+            title_prefix = "❌ FAILURE: "
+        elif ssim_warning:
+            title_prefix = "⚠️ WARNING: "
+        else:
+            title_prefix = "✅ "
+        
+        title = f"{ticket_id} {os.getenv('ZULIP_SUBJECT', 'Monitoring')} {target_name}"
+        
         Notify.send(
-            title=f"{ticket_id} {os.getenv('ZULIP_SUBJECT', 'Monitoring Complete :')} {target_name}",
+            title=title,
             body=full_message
         )
-        print("✅ Monitoring results notification sent")
+        print(f"✅ Monitoring results notification sent")
     except Exception as e:
         print(f"❌ Failed to send notification: {e}")
-        print(full_message)  # Fallback to print
+        print(full_message)
 
-
-# Alternative version with compact text
 def wait_for_completion_and_notify_compact(target, sites_data, start_time):
     """Wait for all jobs to complete, then send compact monitoring results"""
     from rq.job import Job
@@ -2307,7 +2379,53 @@ def serve_bash_script(request, script):
     except Exception as e:
         return HttpResponse(f"Error reading file: {e}", status=500)
 
-
+@extend_schema(
+    methods=['POST'],
+    description="Set an existing snapshot as the new baseline for its site. This will automatically unset any previous baseline for the same site.",
+    summary="Set Snapshot as Baseline",
+    parameters=[
+        OpenApiParameter(
+            name='snapshot_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='ID of the snapshot to set as baseline',
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Snapshot set as baseline successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string', 'example': 'Snapshot 123 set as baseline'}
+                }
+            }
+        ),
+        404: OpenApiResponse(
+            description="Snapshot not found",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string', 'example': 'Snapshot 123 not found'}
+                }
+            }
+        ),
+        500: OpenApiResponse(
+            description="Internal server error",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+    },
+    tags=['snapshots'],
+)
 @api_view(['POST'])
 @ip_allow(mode='all')
 def set_snapshot_baseline(request, snapshot_id):
@@ -2334,3 +2452,246 @@ def set_snapshot_baseline(request, snapshot_id):
             'status': 'error',
             'message': f'Snapshot {snapshot_id} not found'
         }, status=404)
+
+
+@extend_schema(
+    methods=['DELETE'],
+    description="Permanently delete a site and all its associated files from remote storage. This will also delete all snapshots, comparisons, and scores for this site.",
+    summary="Delete Site by Name",
+    parameters=[
+        OpenApiParameter(
+            name='site_name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Domain name of the site to delete (e.g., example.com)',
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Site deleted successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string', 'example': 'Site "example.com" and all associated files deleted successfully'}
+                }
+            }
+        ),
+        404: OpenApiResponse(
+            description="Site not found",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string', 'example': 'Site "example.com" not found'}
+                }
+            }
+        ),
+        500: OpenApiResponse(
+            description="Internal server error",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+    },
+    tags=['sites'],
+)
+@api_view(['DELETE'])
+@ip_allow(mode='all')
+def delete_site_by_name(request, site_name):
+    """
+    Delete a site by name and all its associated remote files
+    DELETE /api/v1/sites/example.com/delete/
+    """
+    try:
+        from apps.monitoring.models import Site
+        
+        site = Site.objects.get(name=site_name.lower().strip())
+        site_name_deleted = site.name
+        
+        # The pre_delete signal will handle file cleanup
+        site.delete()
+        
+        return Response({
+            'status': 'success',
+            'message': f'Site "{site_name_deleted}" and all associated files deleted successfully'
+        })
+        
+    except Site.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': f'Site "{site_name}" not found'
+        }, status=404)
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+
+@extend_schema(
+    methods=['DELETE'],
+    description="Permanently delete a server and all its associated sites, snapshots, comparisons, and files from remote storage.",
+    summary="Delete Server by Name",
+    parameters=[
+        OpenApiParameter(
+            name='server_name',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Name of the server to delete (URL-encode spaces)',
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Server deleted successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string', 'example': 'Server "Web Server 1" and 5 site(s) with all associated files deleted successfully'}
+                }
+            }
+        ),
+        404: OpenApiResponse(
+            description="Server not found",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string', 'example': 'Server "Web Server 1" not found'}
+                }
+            }
+        ),
+        500: OpenApiResponse(
+            description="Internal server error",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+    },
+    tags=['servers'],
+)
+@api_view(['DELETE'])
+@ip_allow(mode='all')
+def delete_server_by_name(request, server_name):
+    """
+    Delete a server by name and all its associated remote files
+    DELETE /api/v1/servers/Web%20Server%201/delete/
+    """
+    try:
+        from apps.monitoring.models import Server
+        
+        server = Server.objects.get(name=server_name)
+        server_name_deleted = server.name
+        
+        # Count sites before deletion
+        sites_count = server.domains.count()
+        
+        # The pre_delete signal will handle file cleanup for all sites
+        server.delete()
+        
+        return Response({
+            'status': 'success',
+            'message': f'Server "{server_name_deleted}" and {sites_count} site(s) with all associated files deleted successfully'
+        })
+        
+    except Server.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': f'Server "{server_name}" not found'
+        }, status=404)
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+
+@extend_schema(
+    methods=['DELETE'],
+    description="Permanently delete a snapshot and its associated screenshot file from remote storage.",
+    summary="Delete Snapshot by ID",
+    parameters=[
+        OpenApiParameter(
+            name='snapshot_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='ID of the snapshot to delete',
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Snapshot deleted successfully",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'message': {'type': 'string', 'example': 'Snapshot 12345 and its associated file deleted successfully'}
+                }
+            }
+        ),
+        404: OpenApiResponse(
+            description="Snapshot not found",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string', 'example': 'Snapshot 12345 not found'}
+                }
+            }
+        ),
+        500: OpenApiResponse(
+            description="Internal server error",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'error'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+    },
+    tags=['snapshots'],
+)
+@api_view(['DELETE'])
+@ip_allow(mode='all')
+def delete_snapshot_by_id(request, snapshot_id):
+    """
+    Delete a snapshot by ID and its remote file
+    DELETE /api/v1/snapshots/123/delete/
+    """
+    try:
+        from apps.monitoring.models import SiteSnapshot
+        
+        snapshot = SiteSnapshot.objects.get(id=snapshot_id)
+        snapshot_id_deleted = snapshot.id
+        
+        # The model's delete() method handles file cleanup
+        snapshot.delete()
+        
+        return Response({
+            'status': 'success',
+            'message': f'Snapshot {snapshot_id_deleted} and its associated file deleted successfully'
+        })
+        
+    except SiteSnapshot.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': f'Snapshot {snapshot_id} not found'
+        }, status=404)
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)

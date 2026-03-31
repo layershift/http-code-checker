@@ -138,8 +138,41 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'codechecker.wsgi.application'
 
+REMOTE_UPLOADER_URL = os.getenv('REMOTE_UPLOADER_URL', 'http://dont-delete-uploader.man-1.solus.stage.town:8000')
+REMOTE_UPLOADER_ENABLED = os.getenv('REMOTE_UPLOADER_ENABLED', 'False').lower() == 'true'
+
+if REMOTE_UPLOADER_ENABLED:
+    # Use the full module path
+    DEFAULT_FILE_STORAGE = 'apps.monitoring.storage.RemoteUploaderStorage'
+else:
+    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
+
+if REMOTE_UPLOADER_ENABLED:
+    STORAGES = {
+        "default": {
+            "BACKEND": "apps.monitoring.storage.RemoteUploaderStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+else:
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+    
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+STATIC_ROOT = BASE_DIR / "static"
+
+REMOTE_UPLOADER_TIMEOUT = 30
+
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases

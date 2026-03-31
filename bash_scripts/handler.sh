@@ -26,6 +26,9 @@ usage() {
     echo "  --make-all-baseline-snapshots      Create snapshots for all domains and set as baseline"
     echo "  --report DOMAIN                    Generate report for specific domain"
     echo "  --report-all                       Generate server report"
+    echo "  --delete-domain DOMAIN             Delete domain and all associated files"
+    echo "  --delete-server                    Delete this server and all associated files"
+    echo "  --delete-snapshot ID               Delete snapshot by ID and its associated file"
     echo "  --help                             Show this help message"
     echo ""
     echo "Optional ticket parameter:"
@@ -45,6 +48,18 @@ check_plesk() {
     if ! command -v plesk &> /dev/null; then
         echo -e "${RED}Error: plesk command not found. Are you running this on a Plesk server?${NC}"
         exit 1
+    fi
+}
+
+# Function to get domain IP from Plesk
+get_domain_ip() {
+    local domain="$1"
+    local ip=$(plesk db -N -e "SELECT ip.ip_address FROM domains d INNER JOIN DomainServices ds ON ds.dom_id = d.id INNER JOIN IpAddressesCollections ic ON ic.ipCollectionId = ds.ipCollectionId INNER JOIN IP_Addresses ip ON ip.id = ic.ipAddressId WHERE d.name = '$domain' AND ds.type = 'web' AND ds.status = 0 AND d.status = 0 AND ip.ip_address NOT LIKE '%:%' LIMIT 1;" 2>/dev/null)
+
+    if [ -z "$ip" ]; then
+        echo "$(hostname -I | awk '{print $1}')"
+    else
+        echo "$ip"
     fi
 }
 
@@ -70,7 +85,7 @@ build_json_payload() {
     local key="$1"
     local value="$2"
     local ticket="$3"
-    
+
     if [ "$ticket" = "None" ]; then
         echo "{\"$key\": \"$value\"}"
     else
@@ -81,18 +96,18 @@ build_json_payload() {
 # Main script logic
 main() {
     check_curl
-    
+
     if [ $# -eq 0 ]; then
         usage
         exit 1
     fi
-    
+
     # Store all arguments for processing
     ALL_ARGS=("$@")
-    
+
     # Get ticket_id from arguments
     TICKET_ID=$(get_ticket_id "${ALL_ARGS[@]}")
-    
+
     case "$1" in
         --add-server)
             echo -e "${BLUE}Adding server: $HOSTNAME${NC}"
@@ -101,36 +116,39 @@ main() {
                 -d "{\"name\": \"$HOSTNAME\", \"description\": \"$HOSTNAME\"}"
             echo ""
             ;;
-            
+
         --add-domain)
             if [ -z "$2" ]; then
                 echo -e "${RED}Error: Domain name required${NC}"
                 usage
                 exit 1
             fi
-            echo -e "${BLUE}Adding domain: $2${NC}"
-            PAYLOAD=$(build_json_payload "domain" "$2" "$TICKET_ID")
+            check_plesk
+            DOMAIN="$2"
+            IP=$(get_domain_ip "$DOMAIN")
+            echo -e "${BLUE}Adding domain: $DOMAIN with IP: $IP${NC}"
             curl -X POST "${BASE_URL}/sites/" \
                 -H "Content-Type: application/json" \
-                -d "{\"name\":\"$2\"}"
+                -d "{\"name\":\"$DOMAIN\", \"ip\":\"$IP\"}"
             echo ""
             ;;
-            
+
         --add-all-domains)
             check_plesk
             echo -e "${BLUE}Adding all domains from Plesk...${NC}"
             plesk bin domain --list | while read domain; do
                 if [ ! -z "$domain" ]; then
-                    echo -e "${YELLOW}Adding domain: $domain${NC}"
+                    IP=$(get_domain_ip "$domain")
+                    echo -e "${YELLOW}Adding domain: $domain with IP: $IP${NC}"
                     curl -X POST "${BASE_URL}/sites/" \
                         -H "Content-Type: application/json" \
-                        -d "{\"name\":\"$domain\"}"
+                        -d "{\"name\":\"$domain\", \"ip\":\"$IP\"}"
                     echo ""
                 fi
             done
             echo -e "${GREEN}All domains processed${NC}"
             ;;
-            
+
         --make-snapshot)
             if [ -z "$2" ]; then
                 echo -e "${RED}Error: Domain name required${NC}"
@@ -156,7 +174,7 @@ main() {
                 -d "{\"name\":\"$2\", \"set_as_baseline\": \"true\"}"
             echo ""
             ;;
-            
+
         --make-all-snapshots)
             check_plesk
             echo -e "${BLUE}Creating snapshots for all domains...${NC}"
@@ -171,7 +189,7 @@ main() {
             done
             echo -e "${GREEN}All snapshots created${NC}"
             ;;
-        
+
         --make-all-baseline-snapshots)
             check_plesk
             echo -e "${BLUE}Creating snapshots for all domains...${NC}"
@@ -200,7 +218,7 @@ main() {
                 -d "$PAYLOAD"
             echo ""
             ;;
-            
+
         --report-all)
             echo -e "${BLUE}Generating server report for: $HOSTNAME${NC}"
             PAYLOAD=$(build_json_payload "server" "$HOSTNAME" "$TICKET_ID")
@@ -209,11 +227,62 @@ main() {
                 -d "$PAYLOAD"
             echo ""
             ;;
-            
+
+        --delete-domain)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Domain name required${NC}"
+                usage
+                exit 1
+            fi
+            echo -e "${RED}⚠️  WARNING: This will delete domain $2 and ALL associated files!${NC}"
+            echo -e "${YELLOW}Are you sure? Type 'yes' to confirm: ${NC}"
+            read -r confirmation
+            if [ "$confirmation" = "yes" ]; then
+                echo -e "${BLUE}Deleting domain: $2 and all associated files...${NC}"
+                curl -X DELETE "${BASE_URL}/sites/$2/delete/"
+                echo ""
+            else
+                echo -e "${RED}Deletion cancelled${NC}"
+            fi
+            ;;
+
+        --delete-server)
+            echo -e "${RED}⚠️  WARNING: This will delete server $HOSTNAME and ALL associated domains, snapshots, comparisons, and files!${NC}"
+            echo -e "${YELLOW}Are you sure? Type 'yes' to confirm: ${NC}"
+            read -r confirmation
+            if [ "$confirmation" = "yes" ]; then
+                echo -e "${BLUE}Deleting server: $HOSTNAME and all associated files...${NC}"
+                # URL encode the server name (replace spaces with %20)
+                ENCODED_SERVER=$(echo "$HOSTNAME" | sed 's/ /%20/g')
+                curl -X DELETE "${BASE_URL}/servers/$ENCODED_SERVER/delete/"
+                echo ""
+            else
+                echo -e "${RED}Deletion cancelled${NC}"
+            fi
+            ;;
+
+        --delete-snapshot)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Snapshot ID required${NC}"
+                usage
+                exit 1
+            fi
+            echo -e "${RED}⚠️  WARNING: This will delete snapshot $2 and its associated file!${NC}"
+            echo -e "${YELLOW}Are you sure? Type 'yes' to confirm: ${NC}"
+            read -r confirmation
+            if [ "$confirmation" = "yes" ]; then
+                echo -e "${BLUE}Deleting snapshot: $2 and its associated file...${NC}"
+                curl -X DELETE "${BASE_URL}/snapshots/$2/delete/"
+                echo ""
+            else
+                echo -e "${RED}Deletion cancelled${NC}"
+            fi
+            ;;
+
         --help)
             usage
             ;;
-            
+
         *)
             echo -e "${RED}Unknown option: $1${NC}"
             usage
