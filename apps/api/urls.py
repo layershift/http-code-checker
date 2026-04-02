@@ -21,6 +21,7 @@ urlpatterns = [
     
     path('sites/<str:site_name>/delete/', views.delete_site_by_name, name='delete_site_by_name'),
     path('servers/<str:server_name>/delete/', views.delete_server_by_name, name='delete_server_by_name'),
+    path('servers/check-server-baseline/', views.check_server_baseline_health, name='check_server_baseline_health'),
     path('v1/snapshots/<int:snapshot_id>/delete/', views.delete_snapshot_by_id, name='delete_snapshot_by_id'),
 
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

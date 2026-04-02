@@ -29,6 +29,7 @@ usage() {
     echo "  --delete-domain DOMAIN             Delete domain and all associated files"
     echo "  --delete-server                    Delete this server and all associated files"
     echo "  --delete-snapshot ID               Delete snapshot by ID and its associated file"
+    echo "  --check-server                     Check baseline health for this server"
     echo "  --help                             Show this help message"
     echo ""
     echo "Optional ticket parameter:"
@@ -277,6 +278,14 @@ main() {
             else
                 echo -e "${RED}Deletion cancelled${NC}"
             fi
+            ;;
+
+        --check-server)
+            echo -e "${BLUE}Checking baseline health for server: $HOSTNAME${NC}"
+            curl -X POST "${BASE_URL}/servers/check-server-baseline/" \
+                -H "Content-Type: application/json" \
+                -d "{\"server\": \"$HOSTNAME\"}"
+            echo ""
             ;;
 
         --help)

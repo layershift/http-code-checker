@@ -2695,3 +2695,147 @@ def delete_snapshot_by_id(request, snapshot_id):
             'status': 'error',
             'message': str(e)
         }, status=500)
+    
+
+
+@extend_schema(
+    methods=['POST'],
+    description="Check if all sites on a server have valid baselines (created within the configured age limit).",
+    summary="Check Server Baseline Health",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'server': {'type': 'string', 'description': 'Server name to check', 'example': 'Web Server 1'},
+            },
+            'required': ['server'],
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Health check result",
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'example': 'success'},
+                    'result': {'type': 'boolean', 'example': True},
+                    'message': {'type': 'string'},
+                    'details': {
+                        'type': 'object',
+                        'properties': {
+                            'total_sites': {'type': 'integer'},
+                            'sites_with_baseline': {'type': 'integer'},
+                            'sites_without_baseline': {'type': 'array'},
+                            'sites_with_expired_baseline': {'type': 'array'},
+                            'max_baseline_age_days': {'type': 'integer'}
+                        }
+                    }
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Bad request - missing server name"),
+        404: OpenApiResponse(description="Server not found"),
+    },
+    tags=['monitoring'],
+)
+@api_view(['POST'])
+@ip_allow(mode='all')
+def check_server_baseline_health(request):
+    """
+    Check if all sites on a server have valid baselines
+    Returns True if all sites have baselines not older than MAX_BASELINE_AGE_DAYS
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+    from django.conf import settings
+    try:
+        data = request.data
+        
+        server_name = data.get('server')
+        
+        if not server_name:
+            return Response({
+                'status': 'error',
+                'message': 'Server name is required in payload'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get the server
+        try:
+            server = Server.objects.get(name=server_name)
+        except Server.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': f'Server "{server_name}" not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get max baseline age from settings (default 7 days)
+        from django.conf import settings
+        max_age_days = getattr(settings, 'MAX_BASELINE_AGE_DAYS', 7)
+        cutoff_date = timezone.now() - timedelta(days=max_age_days)
+        
+        # Get all active sites on this server
+        sites = server.domains.filter(is_active=True)
+        total_sites = sites.count()
+        
+        if total_sites == 0:
+            return Response({
+                'status': 'success',
+                'result': True,
+                'message': 'No active sites on this server',
+                'details': {
+                    'total_sites': 0,
+                    'sites_with_baseline': 0,
+                    'sites_without_baseline': [],
+                    'sites_with_expired_baseline': [],
+                    'max_baseline_age_days': max_age_days
+                }
+            })
+        
+        sites_without_baseline = []
+        sites_with_expired_baseline = []
+        
+        for site in sites:
+            # Get the baseline snapshot for this site
+            baseline = site.snapshots.filter(is_baseline=True).first()
+            
+            if not baseline:
+                sites_without_baseline.append(site.name)
+            elif baseline.taken_at < cutoff_date:
+                sites_with_expired_baseline.append({
+                    'name': site.name,
+                    'baseline_date': baseline.taken_at.isoformat(),
+                    'age_days': (timezone.now() - baseline.taken_at).days
+                })
+        
+        # Check if all sites are healthy
+        all_healthy = (len(sites_without_baseline) == 0 and len(sites_with_expired_baseline) == 0)
+        
+        # Build message
+        if all_healthy:
+            message = f"All {total_sites} site(s) have valid baselines (within {max_age_days} days)"
+        else:
+            issues = []
+            if sites_without_baseline:
+                issues.append(f"{len(sites_without_baseline)} site(s) without baseline")
+            if sites_with_expired_baseline:
+                issues.append(f"{len(sites_with_expired_baseline)} site(s) with expired baseline (> {max_age_days} days)")
+            message = f"Baseline issues found: {', '.join(issues)}"
+        
+        return Response({
+            'status': 'success',
+            'result': all_healthy,
+            'message': message,
+            'details': {
+                'total_sites': total_sites,
+                'sites_with_baseline': total_sites - len(sites_without_baseline),
+                'sites_without_baseline': sites_without_baseline,
+                'sites_with_expired_baseline': sites_with_expired_baseline,
+                'max_baseline_age_days': max_age_days
+            }
+        })
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
