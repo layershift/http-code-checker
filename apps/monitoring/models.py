@@ -420,8 +420,6 @@ def delete_server_files_signal(sender, instance, **kwargs):
     print(f"🗑️ Deleting server: {instance.name} with {sites_count} sites")
     # No need to manually delete files - cascade will trigger site deletion, which triggers snapshot/comparison deletion
 
-# monitoring/models.py - Add this new model
-
 class ZulipMessage(models.Model):
     """
     Tracks Zulip messages sent for monitoring reports
@@ -434,16 +432,14 @@ class ZulipMessage(models.Model):
         ('partial', 'Partial Success'),
     ]
     
-    # Message identification
     message_id = models.CharField(
         max_length=255,
         unique=True,
         help_text="Zulip message ID or custom tracking ID"
     )
     
-    # Related objects
     server = models.ForeignKey(
-        Server,
+        'Server',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -451,57 +447,43 @@ class ZulipMessage(models.Model):
     )
     
     site = models.ForeignKey(
-        Site,
+        'Site',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="zulip_messages"
     )
     
-    # Message content
     title = models.CharField(max_length=500, blank=True)
     body = models.TextField(blank=True)
     
-    # Status tracking
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default='pending'
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     
-    # Evaluation results
     total_sites = models.IntegerField(default=0)
     successful_sites = models.IntegerField(default=0)
     failed_sites = models.IntegerField(default=0)
     warning_sites = models.IntegerField(default=0)
     
-    # Detailed results (JSON)
+    # Track progress per site
+    sites_processed = models.IntegerField(default=0)
+    sites_pending = models.IntegerField(default=0)
+    
     results_summary = models.JSONField(default=dict, blank=True)
     
-    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     processed_at = models.DateTimeField(null=True, blank=True)
     
-    # Metadata
     ticket_id = models.CharField(max_length=255, null=True, blank=True)
-    source = models.CharField(max_length=100, default='api')  # api, cron, manual
+    source = models.CharField(max_length=100, default='api')
     
     class Meta:
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['message_id']),
             models.Index(fields=['server', '-created_at']),
-            models.Index(fields=['site', '-created_at']),
             models.Index(fields=['status']),
-            models.Index(fields=['created_at']),
         ]
     
     def __str__(self):
-        return f"{self.message_id} - {self.status} - {self.created_at}"
-    
-    def get_duration(self):
-        """Get processing duration in seconds"""
-        if self.processed_at and self.created_at:
-            return (self.processed_at - self.created_at).total_seconds()
-        return None
+        return f"{self.message_id} - {self.status}"

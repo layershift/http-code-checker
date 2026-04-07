@@ -26,9 +26,7 @@ urlpatterns = [
 
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
-    path('zulip-message/record/', views.record_zulip_message, name='record_zulip_message'),
-    path('zulip-message/status/', views.get_last_evaluation_status, name='get_last_evaluation_status'),
-    path('zulip-message/update/', views.update_zulip_message_status, name='update_zulip_message_status'),
+    path('monitoring/status/', views.get_monitoring_status, name='get_monitoring_status'),
    
     
 ]

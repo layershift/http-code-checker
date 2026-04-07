@@ -1951,6 +1951,23 @@ def dispatch_comparison(request):
                 }, status=404)
         
         # Start background task to wait for completion and send success notification
+        import uuid
+        message_id = str(uuid.uuid4())
+
+        # Create initial Zulip message record
+        from apps.monitoring.models import ZulipMessage
+        zulip_msg = ZulipMessage.objects.create(
+            message_id=message_id,
+            server=server if server_name else None,
+            site=site if domain_name else None,
+            title=f"Monitoring: {server_name or domain_name}",
+            status='pending',
+            total_sites=len(results['sites']),
+            sites_pending=len(results['sites']),
+            ticket_id=ticket_id,
+            source='api'
+        )
+        print(f"📝 Created Zulip tracking message: {message_id}")
         thread = threading.Thread(
             target=wait_for_completion_and_notify,
             args=(results['target'], results['sites'], results['start_time'])
@@ -2023,18 +2040,48 @@ def enqueue_site_monitoring(site, queue, ticket_id=None):
     }
 
 
-def wait_for_completion_and_notify(target, sites_data, start_time):
-    """Wait for all jobs to complete, then send monitoring results via Notify.send()"""
+def wait_for_completion_and_notify(target, sites_data, start_time, message_id=None):
+    """
+    Wait for all jobs to complete, then send monitoring results via Notify.send()
+    Also updates ZulipMessage status in real-time
+    """
     from rq.job import Job
     from django_rq import get_queue
     from datetime import datetime
     import time
     from apps.monitoring.util.evaluator import SiteEvaluator
-    from apps.monitoring.models import SiteSnapshot
+    from apps.monitoring.models import SiteSnapshot, ZulipMessage
     import os
     
     queue = get_queue('default')
     connection = queue.connection
+    
+    # Create or update Zulip message record
+    zulip_msg = None
+    if message_id:
+        try:
+            zulip_msg = ZulipMessage.objects.get(message_id=message_id)
+            zulip_msg.status = 'processing'
+            zulip_msg.total_sites = len(sites_data)
+            zulip_msg.sites_pending = len(sites_data)
+            zulip_msg.save()
+            print(f"📝 Zulip message {message_id} status: PROCESSING")
+        except ZulipMessage.DoesNotExist:
+            # Create if doesn't exist
+            target_name = target.get('name', 'Unknown')
+            target_type = target.get('type', 'target')
+            zulip_msg = ZulipMessage.objects.create(
+                message_id=message_id,
+                server_id=target.get('id') if target_type == 'server' else None,
+                title=f"Monitoring: {target_name}",
+                status='processing',
+                total_sites=len(sites_data),
+                sites_pending=len(sites_data),
+                source='api'
+            )
+            print(f"📝 Created Zulip message {message_id} with status: PROCESSING")
+    else:
+        print("⚠️ No message_id provided, skipping Zulip status tracking")
     
     # Collect all job IDs
     all_job_ids = []
@@ -2058,9 +2105,17 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
 
     # Track completed sites
     site_completion = {site['name']: {job_type: False for job_type in site['jobs'].keys()} for site in sites_data}
+    
+    # Track site results for summary
+    site_results = {}
+    
+    # Progress tracking variables
+    last_progress_update = 0
+    last_completed_sites = 0
 
     while waited < max_wait:
         completed_jobs = 0
+        completed_sites = 0
         
         for job_id in all_job_ids:
             try:
@@ -2078,9 +2133,24 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
                 job_statuses[job_id] = 'expired'
                 completed_jobs += 1
     
-        completed_sites = sum(1 for site, jobs in site_completion.items() 
-                            if all(jobs.values()))
-    
+        # Calculate completed sites
+        for site_name, jobs in site_completion.items():
+            if all(jobs.values()) and site_name not in site_results:
+                # Site completed, evaluate its status
+                site_results[site_name] = {'completed': True}
+                completed_sites += 1
+        
+        # Update Zulip message progress (every 5 seconds or when sites complete)
+        current_completed_sites = completed_sites
+        if zulip_msg and (current_completed_sites != last_completed_sites or 
+                          time.time() - last_progress_update > 5):
+            zulip_msg.sites_processed = current_completed_sites
+            zulip_msg.sites_pending = len(sites_data) - current_completed_sites
+            zulip_msg.save(update_fields=['sites_processed', 'sites_pending', 'updated_at'])
+            print(f"📊 Progress: {current_completed_sites}/{len(sites_data)} sites completed")
+            last_completed_sites = current_completed_sites
+            last_progress_update = time.time()
+        
         print(f"⏳ Progress: {completed_jobs}/{total_jobs} jobs, {completed_sites}/{len(sites_data)} sites complete")
         
         if completed_jobs >= total_jobs:
@@ -2096,11 +2166,17 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     target_name = target.get('name', 'Unknown')
     target_type = target.get('type', 'target')
     
-    # Build monitoring results - ONLY include warnings and fails
+    # Build monitoring results - evaluate all sites
     warning_lines = []
     fail_lines = []
     status_changed = False
     ssim_warning = False
+    
+    successful_count = 0
+    failed_count = 0
+    warning_count = 0
+    failed_sites_list = []
+    warning_sites_list = []
     
     for site_info in sites_data:
         site_name = site_info['name']
@@ -2149,22 +2225,56 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
                 score_part = "-"
                 change_part = "-"
             
-            # ONLY add to output if there's an issue
+            # Categorize the site
             if not status_unchanged:
                 # Status code changed -> FAIL
                 formatted_line = f"| ❌ | {site_link} | {status_part} | {ssim_part} | {score_part} | {change_part} |"
                 fail_lines.append(formatted_line)
+                failed_count += 1
+                failed_sites_list.append(site_name)
             elif ssim_bad:
                 # Status unchanged but SSIM bad -> WARNING
                 formatted_line = f"| ⚠️ | {site_link} | {status_part} | {ssim_part} | {score_part} | {change_part} |"
                 warning_lines.append(formatted_line)
-            # If everything is fine, don't add anything
+                warning_count += 1
+                warning_sites_list.append(site_name)
+            else:
+                # All good
+                successful_count += 1
             
         else:
             # Failed evaluation
             formatted_line = f"| ❌ {site_name} | Error: {evaluator.error} | - | - | - |"
             fail_lines.append(formatted_line)
+            failed_count += 1
+            failed_sites_list.append(site_name)
             status_changed = True
+    
+    # Determine final status
+    if failed_count > 0:
+        final_status = 'failed'
+    elif warning_count > 0:
+        final_status = 'partial'
+    else:
+        final_status = 'completed'
+    
+    # Update Zulip message with final results
+    if zulip_msg:
+        zulip_msg.status = final_status
+        zulip_msg.successful_sites = successful_count
+        zulip_msg.failed_sites = failed_count
+        zulip_msg.warning_sites = warning_count
+        zulip_msg.sites_processed = len(sites_data)
+        zulip_msg.sites_pending = 0
+        zulip_msg.processed_at = timezone.now()
+        zulip_msg.results_summary = {
+            'failed_sites': failed_sites_list,
+            'warning_sites': warning_sites_list,
+            'successful_count': successful_count,
+            'duration_seconds': duration
+        }
+        zulip_msg.save()
+        print(f"📝 Zulip message {message_id} status: {final_status.upper()}")
     
     # Combine all monitoring texts
     monitoring_text = ""
@@ -2180,7 +2290,6 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         monitoring_text += "| --- | --- | --- | --- | --- | ---\n"
         monitoring_text += "\n".join(warning_lines)
     
-    
     # Prepare the full message
     if target_type == 'server':
         header = f"📊 Monitoring Report for Server: {target_name}"
@@ -2188,10 +2297,10 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         header = f"📊 Monitoring Report for Domain: {target_name}"
 
     # Determine overall status emoji
-    if status_changed:
+    if failed_count > 0:
         overall_emoji = "❌"
         overall_status_text = "FAILURES DETECTED"
-    elif ssim_warning:
+    elif warning_count > 0:
         overall_emoji = "⚠️"
         overall_status_text = "WARNINGS DETECTED"
     else:
@@ -2202,6 +2311,7 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         f"{header}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Sites: {len(sites_data)} | Duration: {duration:.1f}s\n"
+        f"Successful: {successful_count} | Failed: {failed_count} | Warnings: {warning_count}\n"
         f"Overall Status: {overall_emoji} {overall_status_text}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
     )
@@ -2217,21 +2327,11 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
         if first_snapshot and first_snapshot.ticket:
             ticket_id = first_snapshot.ticket
     
-    print(f"Ticket ID: {ticket_id}")
-    
-    # Send notification
+    # Send Zulip notification
     try:
         from apps.monitoring.utils import Notify
         
-        # Determine notification title prefix
-        if status_changed:
-            title_prefix = "❌ FAILURE: "
-        elif ssim_warning:
-            title_prefix = "⚠️ WARNING: "
-        else:
-            title_prefix = "✅ "
-        
-        title = f"{ticket_id}{os.getenv('ZULIP_SUBJECT', 'Monitoring')} {target_name}"
+        title = f"{ticket_id} {os.getenv('ZULIP_SUBJECT', 'Monitoring')} {target_name}"
         
         Notify.send(
             title=title,
@@ -2241,6 +2341,14 @@ def wait_for_completion_and_notify(target, sites_data, start_time):
     except Exception as e:
         print(f"❌ Failed to send notification: {e}")
         print(full_message)
+    
+    return {
+        'status': final_status,
+        'successful': successful_count,
+        'failed': failed_count,
+        'warnings': warning_count,
+        'duration': duration
+    }
 
 def wait_for_completion_and_notify_compact(target, sites_data, start_time):
     """Wait for all jobs to complete, then send compact monitoring results"""
@@ -2889,377 +2997,77 @@ def check_server_baseline_health(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# monitoring/views.py - Add these new endpoints
-
-@extend_schema(
-    methods=['POST'],
-    description="Create or update a Zulip message record for tracking monitoring results.",
-    summary="Record Zulip Message Status",
-    request={
-        'application/json': {
-            'type': 'object',
-            'properties': {
-                'message_id': {'type': 'string', 'description': 'Unique message ID'},
-                'server': {'type': 'string', 'description': 'Server name'},
-                'site': {'type': 'string', 'description': 'Site domain name'},
-                'title': {'type': 'string', 'description': 'Message title'},
-                'body': {'type': 'string', 'description': 'Message body'},
-                'status': {'type': 'string', 'enum': ['pending', 'processing', 'completed', 'failed', 'partial']},
-                'total_sites': {'type': 'integer'},
-                'successful_sites': {'type': 'integer'},
-                'failed_sites': {'type': 'integer'},
-                'warning_sites': {'type': 'integer'},
-                'results_summary': {'type': 'object'},
-                'ticket_id': {'type': 'string'},
-                'source': {'type': 'string', 'default': 'api'},
-            },
-            'required': ['message_id'],
-        }
-    },
-    responses={
-        200: OpenApiResponse(description="Message recorded successfully"),
-        400: OpenApiResponse(description="Bad request"),
-    },
-    tags=['monitoring'],
-)
-@api_view(['POST'])
-@ip_allow(mode='all')
-def record_zulip_message(request):
-    """
-    Record a Zulip message in the database for tracking
-    """
-    from apps.monitoring.models import ZulipMessage, Server, Site
-    
-    try:
-        data = request.data
-        
-        message_id = data.get('message_id')
-        if not message_id:
-            return Response({
-                'status': 'error',
-                'message': 'message_id is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get or create the message record
-        zulip_msg, created = ZulipMessage.objects.get_or_create(
-            message_id=message_id,
-            defaults={
-                'status': 'pending',
-                'source': data.get('source', 'api'),
-            }
-        )
-        
-        # Update fields
-        if 'server' in data:
-            try:
-                server = Server.objects.get(name=data['server'])
-                zulip_msg.server = server
-            except Server.DoesNotExist:
-                pass
-        
-        if 'site' in data:
-            try:
-                site = Site.objects.get(name=data['site'])
-                zulip_msg.site = site
-            except Site.DoesNotExist:
-                pass
-        
-        if 'title' in data:
-            zulip_msg.title = data['title']
-        
-        if 'body' in data:
-            zulip_msg.body = data['body']
-        
-        if 'status' in data:
-            zulip_msg.status = data['status']
-            if data['status'] in ['completed', 'failed', 'partial']:
-                zulip_msg.processed_at = timezone.now()
-        
-        if 'total_sites' in data:
-            zulip_msg.total_sites = data['total_sites']
-        
-        if 'successful_sites' in data:
-            zulip_msg.successful_sites = data['successful_sites']
-        
-        if 'failed_sites' in data:
-            zulip_msg.failed_sites = data['failed_sites']
-        
-        if 'warning_sites' in data:
-            zulip_msg.warning_sites = data['warning_sites']
-        
-        if 'results_summary' in data:
-            zulip_msg.results_summary = data['results_summary']
-        
-        if 'ticket_id' in data:
-            zulip_msg.ticket_id = data['ticket_id']
-        
-        zulip_msg.save()
-        
-        return Response({
-            'status': 'success',
-            'message': 'Message recorded successfully',
-            'created': created,
-            'message_id': zulip_msg.message_id,
-            'status': zulip_msg.status
-        })
-        
-    except Exception as e:
-        return Response({
-            'status': 'error',
-            'message': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 @extend_schema(
     methods=['GET'],
-    description="Get the last evaluation status for a server or site after a specific date/time.",
-    summary="Get Last Evaluation Status",
+    description="Get the status of a monitoring job by message ID",
+    summary="Get Monitoring Job Status",
     parameters=[
         OpenApiParameter(
-            name='server',
+            name='message_id',
             type=OpenApiTypes.STR,
             location=OpenApiParameter.QUERY,
-            description='Server name to filter by',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='site',
-            type=OpenApiTypes.STR,
-            location=OpenApiParameter.QUERY,
-            description='Site domain name to filter by',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='since',
-            type=OpenApiTypes.DATETIME,
-            location=OpenApiParameter.QUERY,
-            description='Get messages after this date/time (ISO format)',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='status',
-            type=OpenApiTypes.STR,
-            location=OpenApiParameter.QUERY,
-            description='Filter by status (pending, processing, completed, failed, partial)',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='limit',
-            type=OpenApiTypes.INT,
-            location=OpenApiParameter.QUERY,
-            description='Number of messages to return',
-            required=False,
-            default=10,
+            description='The message ID returned from the dispatch_comparison call',
+            required=True,
         ),
     ],
     responses={
-        200: OpenApiResponse(description="Evaluation status retrieved"),
-        404: OpenApiResponse(description="No messages found"),
+        200: OpenApiResponse(description="Status retrieved"),
+        404: OpenApiResponse(description="Message not found"),
     },
     tags=['monitoring'],
 )
 @api_view(['GET'])
 @ip_allow(mode='all')
-def get_last_evaluation_status(request):
+def get_monitoring_status(request):
     """
-    Get the last evaluation status for a server or site
-    """
-    from apps.monitoring.models import ZulipMessage, Server, Site
-    
-    try:
-        server_name = request.query_params.get('server')
-        site_name = request.query_params.get('site')
-        since = request.query_params.get('since')
-        status_filter = request.query_params.get('status')
-        limit = int(request.query_params.get('limit', 10))
-        
-        if not server_name and not site_name:
-            return Response({
-                'status': 'error',
-                'message': 'Either "server" or "site" parameter is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Build query
-        query = Q()
-        
-        if server_name:
-            try:
-                server = Server.objects.get(name=server_name)
-                query &= Q(server=server)
-            except Server.DoesNotExist:
-                return Response({
-                    'status': 'error',
-                    'message': f'Server "{server_name}" not found'
-                }, status=status.HTTP_404_NOT_FOUND)
-        
-        if site_name:
-            try:
-                site = Site.objects.get(name=site_name)
-                query &= Q(site=site)
-            except Site.DoesNotExist:
-                return Response({
-                    'status': 'error',
-                    'message': f'Site "{site_name}" not found'
-                }, status=status.HTTP_404_NOT_FOUND)
-        
-        if since:
-            try:
-                from dateutil import parser
-                since_date = parser.parse(since)
-                query &= Q(created_at__gte=since_date)
-            except:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid "since" format. Use ISO format (e.g., 2024-01-01T00:00:00)'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if status_filter:
-            query &= Q(status=status_filter)
-        
-        # Get messages
-        messages = ZulipMessage.objects.filter(query).order_by('-created_at')[:limit]
-        
-        if not messages.exists():
-            return Response({
-                'status': 'success',
-                'result': None,
-                'message': 'No evaluation messages found for the specified criteria',
-                'has_evaluation': False
-            })
-        
-        # Get the most recent completed/partial evaluation
-        latest_completed = messages.filter(
-            status__in=['completed', 'partial', 'failed']
-        ).first()
-        
-        # Format response
-        results = []
-        for msg in messages:
-            results.append({
-                'message_id': msg.message_id,
-                'status': msg.status,
-                'created_at': msg.created_at.isoformat(),
-                'processed_at': msg.processed_at.isoformat() if msg.processed_at else None,
-                'duration_seconds': msg.get_duration(),
-                'total_sites': msg.total_sites,
-                'successful_sites': msg.successful_sites,
-                'failed_sites': msg.failed_sites,
-                'warning_sites': msg.warning_sites,
-                'ticket_id': msg.ticket_id,
-                'source': msg.source,
-                'results_summary': msg.results_summary
-            })
-        
-        # Determine if the system is healthy
-        is_healthy = None
-        if latest_completed:
-            is_healthy = (latest_completed.failed_sites == 0 and 
-                         latest_completed.warning_sites == 0 and
-                         latest_completed.status == 'completed')
-        
-        return Response({
-            'status': 'success',
-            'has_evaluation': True,
-            'latest_evaluation': {
-                'is_healthy': is_healthy,
-                'message_id': latest_completed.message_id if latest_completed else None,
-                'status': latest_completed.status if latest_completed else None,
-                'created_at': latest_completed.created_at.isoformat() if latest_completed else None,
-                'total_sites': latest_completed.total_sites if latest_completed else 0,
-                'successful_sites': latest_completed.successful_sites if latest_completed else 0,
-                'failed_sites': latest_completed.failed_sites if latest_completed else 0,
-                'warning_sites': latest_completed.warning_sites if latest_completed else 0,
-            } if latest_completed else None,
-            'recent_evaluations': results,
-            'count': len(results)
-        })
-        
-    except Exception as e:
-        return Response({
-            'status': 'error',
-            'message': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@extend_schema(
-    methods=['POST'],
-    description="Update the status of an existing Zulip message.",
-    summary="Update Zulip Message Status",
-    request={
-        'application/json': {
-            'type': 'object',
-            'properties': {
-                'message_id': {'type': 'string', 'description': 'Unique message ID'},
-                'status': {'type': 'string', 'enum': ['pending', 'processing', 'completed', 'failed', 'partial']},
-                'total_sites': {'type': 'integer'},
-                'successful_sites': {'type': 'integer'},
-                'failed_sites': {'type': 'integer'},
-                'warning_sites': {'type': 'integer'},
-                'results_summary': {'type': 'object'},
-            },
-            'required': ['message_id', 'status'],
-        }
-    },
-    responses={
-        200: OpenApiResponse(description="Message updated successfully"),
-        404: OpenApiResponse(description="Message not found"),
-    },
-    tags=['monitoring'],
-)
-@api_view(['POST'])
-@ip_allow(mode='all')
-def update_zulip_message_status(request):
-    """
-    Update the status of a Zulip message
+    Get the status of a monitoring job by message ID
     """
     from apps.monitoring.models import ZulipMessage
     
     try:
-        data = request.data
+        message_id = request.query_params.get('message_id')
         
-        message_id = data.get('message_id')
         if not message_id:
             return Response({
                 'status': 'error',
-                'message': 'message_id is required'
+                'message': 'message_id parameter is required'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            zulip_msg = ZulipMessage.objects.get(message_id=message_id)
+            msg = ZulipMessage.objects.get(message_id=message_id)
         except ZulipMessage.DoesNotExist:
             return Response({
                 'status': 'error',
                 'message': f'Message with ID "{message_id}" not found'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        if 'status' in data:
-            zulip_msg.status = data['status']
-            if data['status'] in ['completed', 'failed', 'partial']:
-                zulip_msg.processed_at = timezone.now()
-        
-        if 'total_sites' in data:
-            zulip_msg.total_sites = data['total_sites']
-        
-        if 'successful_sites' in data:
-            zulip_msg.successful_sites = data['successful_sites']
-        
-        if 'failed_sites' in data:
-            zulip_msg.failed_sites = data['failed_sites']
-        
-        if 'warning_sites' in data:
-            zulip_msg.warning_sites = data['warning_sites']
-        
-        if 'results_summary' in data:
-            zulip_msg.results_summary = data['results_summary']
-        
-        zulip_msg.save()
+        # Determine if job is complete
+        is_complete = msg.status in ['completed', 'failed', 'partial']
         
         return Response({
             'status': 'success',
-            'message': 'Message updated successfully',
-            'message_id': zulip_msg.message_id,
-            'status': zulip_msg.status,
-            'updated_at': zulip_msg.updated_at.isoformat()
+            'message_id': msg.message_id,
+            'job_status': msg.status,
+            'is_complete': is_complete,
+            'progress': {
+                'total_sites': msg.total_sites,
+                'processed_sites': msg.sites_processed,
+                'pending_sites': msg.sites_pending,
+                'percentage': int((msg.sites_processed / msg.total_sites * 100)) if msg.total_sites > 0 else 0
+            },
+            'results': {
+                'successful_sites': msg.successful_sites,
+                'failed_sites': msg.failed_sites,
+                'warning_sites': msg.warning_sites,
+                'is_healthy': msg.failed_sites == 0 and msg.warning_sites == 0 and msg.status == 'completed'
+            } if is_complete else None,
+            'summary': msg.results_summary if is_complete else None,
+            'timing': {
+                'created_at': msg.created_at.isoformat(),
+                'updated_at': msg.updated_at.isoformat(),
+                'processed_at': msg.processed_at.isoformat() if msg.processed_at else None,
+                'duration_seconds': msg.get_duration() if msg.processed_at else None
+            }
         })
         
     except Exception as e:
