@@ -1970,7 +1970,7 @@ def dispatch_comparison(request):
         print(f"📝 Created Zulip tracking message: {message_id}")
         thread = threading.Thread(
             target=wait_for_completion_and_notify,
-            args=(results['target'], results['sites'], results['start_time'])
+            args=(results['target'], results['sites'], results['start_time'], message_id)
         )
         thread.daemon = True
         thread.start()
@@ -2052,6 +2052,7 @@ def wait_for_completion_and_notify(target, sites_data, start_time, message_id=No
     from apps.monitoring.util.evaluator import SiteEvaluator
     from apps.monitoring.models import SiteSnapshot, ZulipMessage
     import os
+    from django.utils import timezone
     
     queue = get_queue('default')
     connection = queue.connection
@@ -3044,6 +3045,11 @@ def get_monitoring_status(request):
         # Determine if job is complete
         is_complete = msg.status in ['completed', 'failed', 'partial']
         
+        # Calculate duration manually if processed_at exists
+        duration = None
+        if msg.processed_at:
+            duration = (msg.processed_at - msg.created_at).total_seconds()
+        
         return Response({
             'status': 'success',
             'message_id': msg.message_id,
@@ -3061,12 +3067,11 @@ def get_monitoring_status(request):
                 'warning_sites': msg.warning_sites,
                 'is_healthy': msg.failed_sites == 0 and msg.warning_sites == 0 and msg.status == 'completed'
             } if is_complete else None,
-            'summary': msg.results_summary if is_complete else None,
             'timing': {
                 'created_at': msg.created_at.isoformat(),
                 'updated_at': msg.updated_at.isoformat(),
                 'processed_at': msg.processed_at.isoformat() if msg.processed_at else None,
-                'duration_seconds': msg.get_duration() if msg.processed_at else None
+                'duration_seconds': duration
             }
         })
         

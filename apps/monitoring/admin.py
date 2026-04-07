@@ -9,6 +9,40 @@ from django.db.models import Avg, Max, Min
 
 from .utils import capture_screenshot_for_snapshot
 from .tasks import capture_screenshot_task, create_comparison_task
+from django.contrib import admin
+from django.contrib.admin import AdminSite
+from django.utils.html import format_html
+from django.urls import reverse
+from django.db.models import Count, Q
+from django.utils import timezone
+from .models import ZulipMessage, Server, Site, SiteSnapshot, ScreenshotComparison, SiteScore
+
+from django.db.models import Count, Q
+
+class MonitoringAdminSite(AdminSite):
+    site_header = 'Monitoring Administration'
+    site_title = 'Monitoring Admin'
+    
+    def get_app_list(self, request):
+        app_list = super().get_app_list(request)
+        
+        # Add custom statistics to the Zulip Messages section
+        for app in app_list:
+            if app['app_label'] == 'monitoring':
+                for model in app['models']:
+                    if model['object_name'] == 'ZulipMessage':
+                        # Add statistics
+                        model['stats'] = {
+                            'total': ZulipMessage.objects.count(),
+                            'pending': ZulipMessage.objects.filter(status='pending').count(),
+                            'processing': ZulipMessage.objects.filter(status='processing').count(),
+                            'completed': ZulipMessage.objects.filter(status='completed').count(),
+                            'failed': ZulipMessage.objects.filter(status='failed').count(),
+                        }
+                        break
+                break
+        
+        return app_list
 
 class SiteSnapshotInline(admin.TabularInline):
     model = SiteSnapshot
@@ -405,3 +439,197 @@ class SiteScoreAdmin(admin.ModelAdmin):
             avg_security=Avg('security_score')
         )
         return super().changelist_view(request, extra_context=extra_context)
+
+
+# monitoring/admin.py
+from django.contrib import admin
+from django.utils.html import format_html
+from django.urls import reverse
+from .models import ZulipMessage
+
+
+
+
+@admin.register(ZulipMessage)
+class ZulipMessageAdmin(admin.ModelAdmin):
+    list_display = [
+        'message_id', 'status_badge', 'server_link', 'site_link', 
+        'progress_bar', 'ticket_id', 'created_at', 'duration_display'
+    ]
+    list_filter = ['status', 'source', 'created_at']
+    search_fields = ['message_id', 'ticket_id', 'server__name', 'site__name']
+    readonly_fields = [
+        'message_id', 'created_at', 'updated_at', 'processed_at',
+        'status_badge', 'progress_bar', 'server_link', 'site_link',
+        'body_preview', 'duration_display', 'results_preview', 'progress_display'
+    ]
+    
+    fieldsets = (
+        ('Message Information', {
+            'fields': ('message_id', 'ticket_id', 'source', 'status_badge')
+        }),
+        ('Related Objects', {
+            'fields': ('server_link', 'site_link', 'title')
+        }),
+        ('Message Content', {
+            'fields': ('body_preview',),
+            'classes': ('wide',)
+        }),
+        ('Progress Tracking', {
+            'fields': ('progress_display', 'total_sites', 'sites_processed', 'sites_pending')
+        }),
+        ('Results', {
+            'fields': ('successful_sites', 'failed_sites', 'warning_sites', 'results_preview')
+        }),
+        ('Timing', {
+            'fields': ('created_at', 'updated_at', 'processed_at', 'duration_display')
+        }),
+    )
+    
+    def status_badge(self, obj):
+        colors = {
+            'pending': '#6c757d',
+            'processing': '#007bff',
+            'completed': '#28a745',
+            'failed': '#dc3545',
+            'partial': '#fd7e14',
+        }
+        color = colors.get(obj.status, '#6c757d')
+        # FIXED: Pass the color as a single argument with proper placeholder
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: bold;">{}</span>',
+            color, obj.status.upper()
+        )
+    status_badge.short_description = 'Status'
+    
+    def server_link(self, obj):
+        if obj.server:
+            url = reverse('admin:monitoring_server_change', args=[obj.server.id])
+            return format_html('<a href="{}">{}</a>', url, obj.server.name)
+        return '-'
+    server_link.short_description = 'Server'
+    
+    def site_link(self, obj):
+        if obj.site:
+            url = reverse('admin:monitoring_site_change', args=[obj.site.id])
+            return format_html('<a href="{}">{}</a>', url, obj.site.name)
+        return '-'
+    site_link.short_description = 'Site'
+    
+    def progress_bar(self, obj):
+        if obj.total_sites == 0:
+            return 'N/A'
+        percentage = int((obj.sites_processed / obj.total_sites) * 100)
+        
+        if obj.status == 'completed':
+            bg_color = '#28a745'
+        elif obj.status == 'failed':
+            bg_color = '#dc3545'
+        elif obj.status == 'partial':
+            bg_color = '#fd7e14'
+        elif obj.status == 'processing':
+            bg_color = '#007bff'
+        else:
+            bg_color = '#6c757d'
+        
+        # FIXED: Proper format_html with arguments
+        return format_html(
+            '<div style="width: 100%; background-color: #e9ecef; border-radius: 10px; overflow: hidden;">'
+            '<div style="width: {}%; background-color: {}; color: white; text-align: center; font-size: 11px; padding: 2px;">{}%</div>'
+            '</div>',
+            percentage, bg_color, percentage
+        )
+    progress_bar.short_description = 'Progress'
+    
+    def progress_display(self, obj):
+        if obj.total_sites == 0:
+            return "No sites to monitor"
+        percentage = int((obj.sites_processed / obj.total_sites) * 100)
+        return format_html(
+            '<div style="margin-bottom: 10px;">'
+            '<strong>{}/{} sites processed ({}%)</strong><br>'
+            '<progress value="{}" max="100" style="width: 100%; height: 20px;"></progress>'
+            '</div>',
+            obj.sites_processed, obj.total_sites, percentage, percentage
+        )
+    progress_display.short_description = 'Progress Details'
+    
+    def body_preview(self, obj):
+        if not obj.body:
+            return "-"
+        if len(obj.body) > 500:
+            return format_html(
+                '<div style="max-height: 150px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px;">'
+                '<strong>Preview:</strong><br>{}{}</div>',
+                obj.body[:500], '...'
+            )
+        return format_html(
+            '<div style="max-height: 150px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px;">{}</div>',
+            obj.body
+        )
+    body_preview.short_description = 'Message Body'
+    
+    def results_preview(self, obj):
+        html = '<div style="background-color: #f8f9fa; padding: 10px; border-radius: 4px;">'
+        
+        if obj.successful_sites > 0:
+            html += f'<div style="color: #28a745;">✅ Successful: {obj.successful_sites}</div>'
+        if obj.failed_sites > 0:
+            html += f'<div style="color: #dc3545;">❌ Failed: {obj.failed_sites}</div>'
+        if obj.warning_sites > 0:
+            html += f'<div style="color: #fd7e14;">⚠️ Warnings: {obj.warning_sites}</div>'
+        
+        if obj.results_summary:
+            if obj.results_summary.get('failed_sites'):
+                html += '<div style="margin-top: 8px;"><strong>Failed sites:</strong><br>'
+                for site in obj.results_summary['failed_sites'][:5]:
+                    html += f'<span style="background-color: #dc3545; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 2px; display: inline-block;">{site}</span>'
+                if len(obj.results_summary.get('failed_sites', [])) > 5:
+                    html += f'<span>... and {len(obj.results_summary["failed_sites"]) - 5} more</span>'
+                html += '</div>'
+            
+            if obj.results_summary.get('warning_sites'):
+                html += '<div style="margin-top: 8px;"><strong>Warning sites:</strong><br>'
+                for site in obj.results_summary['warning_sites'][:5]:
+                    html += f'<span style="background-color: #fd7e14; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 2px; display: inline-block;">{site}</span>'
+                if len(obj.results_summary.get('warning_sites', [])) > 5:
+                    html += f'<span>... and {len(obj.results_summary["warning_sites"]) - 5} more</span>'
+                html += '</div>'
+        
+        html += '</div>'
+        # FIXED: Use mark_safe for HTML content without placeholders
+        from django.utils.safestring import mark_safe
+        return mark_safe(html)
+    results_preview.short_description = 'Results Summary'
+    
+    def duration_display(self, obj):
+        if obj.processed_at:
+            duration = (obj.processed_at - obj.created_at).total_seconds()
+            if duration < 60:
+                return f"{duration:.1f} seconds"
+            elif duration < 3600:
+                return f"{duration / 60:.1f} minutes"
+            else:
+                return f"{duration / 3600:.1f} hours"
+        return "Still processing"
+    duration_display.short_description = 'Duration'
+    
+    actions = ['mark_as_completed', 'mark_as_failed', 'retry_failed']
+    
+    def mark_as_completed(self, request, queryset):
+        updated = queryset.update(status='completed', processed_at=timezone.now())
+        self.message_user(request, f"Marked {updated} message(s) as completed")
+    mark_as_completed.short_description = "Mark as completed"
+    
+    def mark_as_failed(self, request, queryset):
+        updated = queryset.update(status='failed', processed_at=timezone.now())
+        self.message_user(request, f"Marked {updated} message(s) as failed")
+    mark_as_failed.short_description = "Mark as failed"
+    
+    def retry_failed(self, request, queryset):
+        updated = queryset.filter(status='failed').update(status='pending', processed_at=None)
+        self.message_user(request, f"Reset {updated} message(s) to pending")
+    retry_failed.short_description = "Retry failed messages"
+    
+    def has_add_permission(self, request):
+        return False
