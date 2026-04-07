@@ -30,6 +30,9 @@ usage() {
     echo "  --delete-server                    Delete this server and all associated files"
     echo "  --delete-snapshot ID               Delete snapshot by ID and its associated file"
     echo "  --check-server                     Check baseline health for this server"
+    echo "  --check-ticket TICKET_ID           Check monitoring status by ticket ID (full output)"
+    echo "  --check-ticket-short TICKET_ID     Check monitoring status (returns only true/false)"
+    echo "  --check-ticket-status TICKET_ID    Check ticket status with colored output and exit code"
     echo "  --help                             Show this help message"
     echo ""
     echo "Optional ticket parameter:"
@@ -91,6 +94,113 @@ build_json_payload() {
         echo "{\"$key\": \"$value\"}"
     else
         echo "{\"$key\": \"$value\", \"ticket_id\": \"$ticket\"}"
+    fi
+}
+
+# Function to print monitoring status in a readable format
+print_monitoring_status() {
+    local response="$1"
+
+    # Parse JSON with jq if available, otherwise use grep/sed
+    if command -v jq &> /dev/null; then
+        local status=$(echo "$response" | jq -r '.status // "unknown"')
+        local job_status=$(echo "$response" | jq -r '.job_status // "unknown"')
+        local is_complete=$(echo "$response" | jq -r '.is_complete // false')
+        local total_sites=$(echo "$response" | jq -r '.progress.total_sites // 0')
+        local processed=$(echo "$response" | jq -r '.progress.processed_sites // 0')
+        local percentage=$(echo "$response" | jq -r '.progress.percentage // 0')
+        local successful=$(echo "$response" | jq -r '.results.successful_sites // 0')
+        local failed=$(echo "$response" | jq -r '.results.failed_sites // 0')
+        local warnings=$(echo "$response" | jq -r '.results.warning_sites // 0')
+        local is_healthy=$(echo "$response" | jq -r '.results.is_healthy // false')
+
+        echo -e "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${BLUE}📊 MONITORING STATUS REPORT${NC}"
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+        # Status badge
+        case "$job_status" in
+            pending)
+                echo -e "Status:     ${YELLOW}⏳ PENDING${NC}"
+                ;;
+            processing)
+                echo -e "Status:     ${BLUE}🔄 PROCESSING${NC}"
+                ;;
+            completed)
+                echo -e "Status:     ${GREEN}✅ COMPLETED${NC}"
+                ;;
+            failed)
+                echo -e "Status:     ${RED}❌ FAILED${NC}"
+                ;;
+            partial)
+                echo -e "Status:     ${YELLOW}⚠️ PARTIAL${NC}"
+                ;;
+            *)
+                echo -e "Status:     $job_status"
+                ;;
+        esac
+
+        # Progress bar
+        if [ "$total_sites" -gt 0 ]; then
+            local bar_length=30
+            local filled=$((percentage * bar_length / 100))
+            local empty=$((bar_length - filled))
+
+            echo -e "\n${BLUE}Progress:   ${NC}[$(printf '%0.s█' $(seq 1 $filled))$(printf '%0.s░' $(seq 1 $empty))] ${percentage}%"
+            echo -e "            ${processed}/${total_sites} sites processed"
+        fi
+
+        # Results if complete
+        if [ "$is_complete" = "true" ]; then
+            echo -e "\n${BLUE}Results:${NC}"
+            echo -e "  ✅ Successful: ${GREEN}${successful}${NC}"
+            echo -e "  ❌ Failed:     ${RED}${failed}${NC}"
+            echo -e "  ⚠️ Warnings:   ${YELLOW}${warnings}${NC}"
+
+            if [ "$is_healthy" = "true" ]; then
+                echo -e "\n${GREEN}✅ All systems healthy!${NC}"
+            else
+                echo -e "\n${RED}⚠️ Issues detected! Check details above.${NC}"
+            fi
+        else
+            echo -e "\n${YELLOW}⏳ Job still in progress...${NC}"
+        fi
+
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    else
+        # Fallback if jq is not installed
+        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
+    fi
+}
+
+# Function to check if a ticket is completed (returns true/false)
+check_ticket_completed() {
+    local ticket_id="$1"
+
+    # Query the status endpoint
+    local response=$(curl -s -X GET "${BASE_URL}/monitoring/status/?message_id=${ticket_id}" 2>/dev/null)
+
+    # Check if the job is complete
+    if echo "$response" | grep -q '"is_complete":true'; then
+        echo "true"
+        return 0
+    else
+        echo "false"
+        return 1
+    fi
+}
+
+# Function to check ticket status and exit with appropriate code
+check_ticket_status() {
+    local ticket_id="$1"
+    local response=$(curl -s -X GET "${BASE_URL}/monitoring/status/?message_id=${ticket_id}" 2>/dev/null)
+
+    if echo "$response" | grep -q '"is_complete":true'; then
+        echo -e "${GREEN}✅ Ticket $ticket_id is COMPLETED${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ Ticket $ticket_id is NOT COMPLETED${NC}"
+        return 1
     fi
 }
 
@@ -253,7 +363,6 @@ main() {
             read -r confirmation
             if [ "$confirmation" = "yes" ]; then
                 echo -e "${BLUE}Deleting server: $HOSTNAME and all associated files...${NC}"
-                # URL encode the server name (replace spaces with %20)
                 ENCODED_SERVER=$(echo "$HOSTNAME" | sed 's/ /%20/g')
                 curl -X DELETE "${BASE_URL}/servers/$ENCODED_SERVER/delete/"
                 echo ""
@@ -282,10 +391,49 @@ main() {
 
         --check-server)
             echo -e "${BLUE}Checking baseline health for server: $HOSTNAME${NC}"
-            curl -X POST "${BASE_URL}/servers/check-server-baseline/" \
+            curl -X POST "${BASE_URL}/check-server-baseline/" \
                 -H "Content-Type: application/json" \
                 -d "{\"server\": \"$HOSTNAME\"}"
             echo ""
+            ;;
+
+        --check-ticket)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Ticket ID required${NC}"
+                usage
+                exit 1
+            fi
+            TICKET_TO_CHECK="$2"
+            echo -e "${BLUE}Checking monitoring status for ticket: $TICKET_TO_CHECK${NC}"
+
+            RESPONSE=$(curl -s -X GET "${BASE_URL}/monitoring/status/?message_id=${TICKET_TO_CHECK}")
+
+            if echo "$RESPONSE" | grep -q '"status":"success"'; then
+                print_monitoring_status "$RESPONSE"
+            else
+                echo -e "${RED}❌ No monitoring job found for ticket: $TICKET_TO_CHECK${NC}"
+                echo "$RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$RESPONSE"
+            fi
+            ;;
+
+        --check-ticket-short)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Ticket ID required${NC}"
+                usage
+                exit 1
+            fi
+            TICKET_TO_CHECK="$2"
+            check_ticket_completed "$TICKET_TO_CHECK"
+            ;;
+
+        --check-ticket-status)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Ticket ID required${NC}"
+                usage
+                exit 1
+            fi
+            TICKET_TO_CHECK="$2"
+            check_ticket_status "$TICKET_TO_CHECK"
             ;;
 
         --help)
