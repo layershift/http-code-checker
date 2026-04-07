@@ -2887,3 +2887,383 @@ def check_server_baseline_health(request):
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# monitoring/views.py - Add these new endpoints
+
+@extend_schema(
+    methods=['POST'],
+    description="Create or update a Zulip message record for tracking monitoring results.",
+    summary="Record Zulip Message Status",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'message_id': {'type': 'string', 'description': 'Unique message ID'},
+                'server': {'type': 'string', 'description': 'Server name'},
+                'site': {'type': 'string', 'description': 'Site domain name'},
+                'title': {'type': 'string', 'description': 'Message title'},
+                'body': {'type': 'string', 'description': 'Message body'},
+                'status': {'type': 'string', 'enum': ['pending', 'processing', 'completed', 'failed', 'partial']},
+                'total_sites': {'type': 'integer'},
+                'successful_sites': {'type': 'integer'},
+                'failed_sites': {'type': 'integer'},
+                'warning_sites': {'type': 'integer'},
+                'results_summary': {'type': 'object'},
+                'ticket_id': {'type': 'string'},
+                'source': {'type': 'string', 'default': 'api'},
+            },
+            'required': ['message_id'],
+        }
+    },
+    responses={
+        200: OpenApiResponse(description="Message recorded successfully"),
+        400: OpenApiResponse(description="Bad request"),
+    },
+    tags=['monitoring'],
+)
+@api_view(['POST'])
+@ip_allow(mode='all')
+def record_zulip_message(request):
+    """
+    Record a Zulip message in the database for tracking
+    """
+    from apps.monitoring.models import ZulipMessage, Server, Site
+    
+    try:
+        data = request.data
+        
+        message_id = data.get('message_id')
+        if not message_id:
+            return Response({
+                'status': 'error',
+                'message': 'message_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get or create the message record
+        zulip_msg, created = ZulipMessage.objects.get_or_create(
+            message_id=message_id,
+            defaults={
+                'status': 'pending',
+                'source': data.get('source', 'api'),
+            }
+        )
+        
+        # Update fields
+        if 'server' in data:
+            try:
+                server = Server.objects.get(name=data['server'])
+                zulip_msg.server = server
+            except Server.DoesNotExist:
+                pass
+        
+        if 'site' in data:
+            try:
+                site = Site.objects.get(name=data['site'])
+                zulip_msg.site = site
+            except Site.DoesNotExist:
+                pass
+        
+        if 'title' in data:
+            zulip_msg.title = data['title']
+        
+        if 'body' in data:
+            zulip_msg.body = data['body']
+        
+        if 'status' in data:
+            zulip_msg.status = data['status']
+            if data['status'] in ['completed', 'failed', 'partial']:
+                zulip_msg.processed_at = timezone.now()
+        
+        if 'total_sites' in data:
+            zulip_msg.total_sites = data['total_sites']
+        
+        if 'successful_sites' in data:
+            zulip_msg.successful_sites = data['successful_sites']
+        
+        if 'failed_sites' in data:
+            zulip_msg.failed_sites = data['failed_sites']
+        
+        if 'warning_sites' in data:
+            zulip_msg.warning_sites = data['warning_sites']
+        
+        if 'results_summary' in data:
+            zulip_msg.results_summary = data['results_summary']
+        
+        if 'ticket_id' in data:
+            zulip_msg.ticket_id = data['ticket_id']
+        
+        zulip_msg.save()
+        
+        return Response({
+            'status': 'success',
+            'message': 'Message recorded successfully',
+            'created': created,
+            'message_id': zulip_msg.message_id,
+            'status': zulip_msg.status
+        })
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    methods=['GET'],
+    description="Get the last evaluation status for a server or site after a specific date/time.",
+    summary="Get Last Evaluation Status",
+    parameters=[
+        OpenApiParameter(
+            name='server',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Server name to filter by',
+            required=False,
+        ),
+        OpenApiParameter(
+            name='site',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Site domain name to filter by',
+            required=False,
+        ),
+        OpenApiParameter(
+            name='since',
+            type=OpenApiTypes.DATETIME,
+            location=OpenApiParameter.QUERY,
+            description='Get messages after this date/time (ISO format)',
+            required=False,
+        ),
+        OpenApiParameter(
+            name='status',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Filter by status (pending, processing, completed, failed, partial)',
+            required=False,
+        ),
+        OpenApiParameter(
+            name='limit',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Number of messages to return',
+            required=False,
+            default=10,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(description="Evaluation status retrieved"),
+        404: OpenApiResponse(description="No messages found"),
+    },
+    tags=['monitoring'],
+)
+@api_view(['GET'])
+@ip_allow(mode='all')
+def get_last_evaluation_status(request):
+    """
+    Get the last evaluation status for a server or site
+    """
+    from apps.monitoring.models import ZulipMessage, Server, Site
+    
+    try:
+        server_name = request.query_params.get('server')
+        site_name = request.query_params.get('site')
+        since = request.query_params.get('since')
+        status_filter = request.query_params.get('status')
+        limit = int(request.query_params.get('limit', 10))
+        
+        if not server_name and not site_name:
+            return Response({
+                'status': 'error',
+                'message': 'Either "server" or "site" parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Build query
+        query = Q()
+        
+        if server_name:
+            try:
+                server = Server.objects.get(name=server_name)
+                query &= Q(server=server)
+            except Server.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': f'Server "{server_name}" not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        if site_name:
+            try:
+                site = Site.objects.get(name=site_name)
+                query &= Q(site=site)
+            except Site.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': f'Site "{site_name}" not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        if since:
+            try:
+                from dateutil import parser
+                since_date = parser.parse(since)
+                query &= Q(created_at__gte=since_date)
+            except:
+                return Response({
+                    'status': 'error',
+                    'message': 'Invalid "since" format. Use ISO format (e.g., 2024-01-01T00:00:00)'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if status_filter:
+            query &= Q(status=status_filter)
+        
+        # Get messages
+        messages = ZulipMessage.objects.filter(query).order_by('-created_at')[:limit]
+        
+        if not messages.exists():
+            return Response({
+                'status': 'success',
+                'result': None,
+                'message': 'No evaluation messages found for the specified criteria',
+                'has_evaluation': False
+            })
+        
+        # Get the most recent completed/partial evaluation
+        latest_completed = messages.filter(
+            status__in=['completed', 'partial', 'failed']
+        ).first()
+        
+        # Format response
+        results = []
+        for msg in messages:
+            results.append({
+                'message_id': msg.message_id,
+                'status': msg.status,
+                'created_at': msg.created_at.isoformat(),
+                'processed_at': msg.processed_at.isoformat() if msg.processed_at else None,
+                'duration_seconds': msg.get_duration(),
+                'total_sites': msg.total_sites,
+                'successful_sites': msg.successful_sites,
+                'failed_sites': msg.failed_sites,
+                'warning_sites': msg.warning_sites,
+                'ticket_id': msg.ticket_id,
+                'source': msg.source,
+                'results_summary': msg.results_summary
+            })
+        
+        # Determine if the system is healthy
+        is_healthy = None
+        if latest_completed:
+            is_healthy = (latest_completed.failed_sites == 0 and 
+                         latest_completed.warning_sites == 0 and
+                         latest_completed.status == 'completed')
+        
+        return Response({
+            'status': 'success',
+            'has_evaluation': True,
+            'latest_evaluation': {
+                'is_healthy': is_healthy,
+                'message_id': latest_completed.message_id if latest_completed else None,
+                'status': latest_completed.status if latest_completed else None,
+                'created_at': latest_completed.created_at.isoformat() if latest_completed else None,
+                'total_sites': latest_completed.total_sites if latest_completed else 0,
+                'successful_sites': latest_completed.successful_sites if latest_completed else 0,
+                'failed_sites': latest_completed.failed_sites if latest_completed else 0,
+                'warning_sites': latest_completed.warning_sites if latest_completed else 0,
+            } if latest_completed else None,
+            'recent_evaluations': results,
+            'count': len(results)
+        })
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    methods=['POST'],
+    description="Update the status of an existing Zulip message.",
+    summary="Update Zulip Message Status",
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'message_id': {'type': 'string', 'description': 'Unique message ID'},
+                'status': {'type': 'string', 'enum': ['pending', 'processing', 'completed', 'failed', 'partial']},
+                'total_sites': {'type': 'integer'},
+                'successful_sites': {'type': 'integer'},
+                'failed_sites': {'type': 'integer'},
+                'warning_sites': {'type': 'integer'},
+                'results_summary': {'type': 'object'},
+            },
+            'required': ['message_id', 'status'],
+        }
+    },
+    responses={
+        200: OpenApiResponse(description="Message updated successfully"),
+        404: OpenApiResponse(description="Message not found"),
+    },
+    tags=['monitoring'],
+)
+@api_view(['POST'])
+@ip_allow(mode='all')
+def update_zulip_message_status(request):
+    """
+    Update the status of a Zulip message
+    """
+    from apps.monitoring.models import ZulipMessage
+    
+    try:
+        data = request.data
+        
+        message_id = data.get('message_id')
+        if not message_id:
+            return Response({
+                'status': 'error',
+                'message': 'message_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            zulip_msg = ZulipMessage.objects.get(message_id=message_id)
+        except ZulipMessage.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': f'Message with ID "{message_id}" not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        if 'status' in data:
+            zulip_msg.status = data['status']
+            if data['status'] in ['completed', 'failed', 'partial']:
+                zulip_msg.processed_at = timezone.now()
+        
+        if 'total_sites' in data:
+            zulip_msg.total_sites = data['total_sites']
+        
+        if 'successful_sites' in data:
+            zulip_msg.successful_sites = data['successful_sites']
+        
+        if 'failed_sites' in data:
+            zulip_msg.failed_sites = data['failed_sites']
+        
+        if 'warning_sites' in data:
+            zulip_msg.warning_sites = data['warning_sites']
+        
+        if 'results_summary' in data:
+            zulip_msg.results_summary = data['results_summary']
+        
+        zulip_msg.save()
+        
+        return Response({
+            'status': 'success',
+            'message': 'Message updated successfully',
+            'message_id': zulip_msg.message_id,
+            'status': zulip_msg.status,
+            'updated_at': zulip_msg.updated_at.isoformat()
+        })
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
