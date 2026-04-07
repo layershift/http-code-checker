@@ -3026,7 +3026,7 @@ def get_monitoring_status(request):
     from apps.monitoring.models import ZulipMessage
     
     try:
-        message_id = request.query_params.get('message_id')
+        message_id = request.query_params.get('ticket_id') or request.query_params.get('message_id')
         
         if not message_id:
             return Response({
@@ -3035,7 +3035,7 @@ def get_monitoring_status(request):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            msg = ZulipMessage.objects.get(message_id=message_id)
+            msg = ZulipMessage.objects.filter(ticket_id=message_id).first()
         except ZulipMessage.DoesNotExist:
             return Response({
                 'status': 'error',
