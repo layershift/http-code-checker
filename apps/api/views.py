@@ -2334,7 +2334,7 @@ def wait_for_completion_and_notify(target, sites_data, start_time, message_id=No
         if ticket_id is None:
             title  = f"[Server] {target_name}"
         else:
-            title = f"{ticket_id} {os.getenv('ZULIP_SUBJECT', 'Monitoring')} {target_name}"
+            title = f"[Server] {target_name}"
         
         Notify.send(
             title=title,
