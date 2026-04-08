@@ -391,7 +391,7 @@ main() {
 
         --check-server)
             echo -e "${BLUE}Checking baseline health for server: $HOSTNAME${NC}"
-            curl -X POST "${BASE_URL}/check-server-baseline/" \
+            curl -X POST "${BASE_URL}/server/check-server-baseline/" \
                 -H "Content-Type: application/json" \
                 -d "{\"server\": \"$HOSTNAME\"}"
             echo ""
