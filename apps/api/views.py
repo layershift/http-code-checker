@@ -2335,11 +2335,10 @@ def wait_for_completion_and_notify(target, sites_data, start_time, message_id=No
             title  = f"[Server] {target_name}"
         else:
             title = f"[Server] {target_name}"
-        
-        Notify.send(
-            title=title,
-            body=full_message
-        )
+        if "stage.town" in target_name.lower():
+            Notify(target="stage").send( title=title,body=full_message)
+        else:
+            Notify().send(title=title, body=full_message)
         print(f"✅ Monitoring results notification sent")
     except Exception as e:
         print(f"❌ Failed to send notification: {e}")

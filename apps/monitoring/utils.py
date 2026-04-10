@@ -205,14 +205,15 @@ def capture_screenshot_for_snapshot(snapshot_id):
         print("🏁 Screenshot capture completed")
 
 
-class Notify:
-    """
-    Abstracts notification and associated setup stuff out of the way
-    """
+class Notify():
+    def __init__(self, target="production"):
+        if target == "production":
+            self.tg = os.getenv('NOTIFICATION_URL_LIVE', '')
+        else:
+            self.tg = os.getenv('NOTIFICATION_URL_STAGE', '')
 
-    apobj = apprise.Apprise()
-    apobj.add(os.getenv('NOTIFICATION_URL', '')) 
+        self.apobj = apprise.Apprise()
+        self.apobj.add(self.tg)
 
-    @classmethod
-    def send(cls, title, body):
-        cls.apobj.notify(title=title, body=body)
+    def send(self, title, body):
+        self.apobj.notify(title=title, body=body)
