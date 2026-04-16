@@ -12,8 +12,8 @@ def generate_ip_addresses(sender, instance, created, **kwargs):
             network = ipaddress.ip_network(instance.network, strict=False)
 
             # Prevent insane generation (enterprise safety)
-            if network.num_addresses > 1024:
-                return  # safety limit
+            # if network.num_addresses > 1024:
+            #     return  # safety limit
 
             for ip in network.hosts():
                 IPAddress.objects.create(
