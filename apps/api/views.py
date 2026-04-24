@@ -2331,10 +2331,10 @@ def wait_for_completion_and_notify(target, sites_data, start_time, message_id=No
     # Send Zulip notification
     try:
         from apps.monitoring.utils import Notify
-        if ticket_id is None:
+        if target_type == 'server':
             title  = f"[Server] {target_name}"
         else:
-            title = f"[Server] {target_name}"
+            title = f"[Domain] {target_name}"
         if "stage.town" in target_name.lower():
             Notify(target="stage").send( title=title,body=full_message)
         else:
