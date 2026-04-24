@@ -209,8 +209,10 @@ class Notify():
     def __init__(self, target="production"):
         if target == "production":
             self.tg = os.getenv('NOTIFICATION_URL_LIVE', '')
-        else:
+        elif target == "stage":
             self.tg = os.getenv('NOTIFICATION_URL_STAGE', '')
+        else:
+            self.tg = os.getenv('NOTIFICATION_URL_LIVE_DOMAIN', '')
 
         self.apobj = apprise.Apprise()
         self.apobj.add(self.tg)

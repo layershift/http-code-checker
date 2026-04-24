@@ -2337,8 +2337,10 @@ def wait_for_completion_and_notify(target, sites_data, start_time, message_id=No
             title = f"[Domain] {target_name}"
         if "stage.town" in target_name.lower():
             Notify(target="stage").send( title=title,body=full_message)
+        elif target_type == 'server':
+            Notify(target="production").send(title=title, body=full_message)
         else:
-            Notify().send(title=title, body=full_message)
+            Notify(target="domain").send(title=title, body=full_message)
         print(f"✅ Monitoring results notification sent")
     except Exception as e:
         print(f"❌ Failed to send notification: {e}")
