@@ -92,6 +92,14 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
         
         # Get snapshot
         snapshot = SiteSnapshot.objects.get(id=snapshot_id)
+        # refresh ip 
+        try:
+            changed, new_ip = snapshot.site.refresh_resolved_ip()
+            if changed:
+                print(f"🔄 Resolved IP updated for {site_name}: {new_ip}")
+        except Exception as e:
+            print(f"⚠️ Could not refresh resolved IP for {site_name}: {e}")
+
         print(f"📸 Processing screenshot for {site_name}")
         
         # Create temp file
