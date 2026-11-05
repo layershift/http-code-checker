@@ -15,6 +15,34 @@
                 <i class="fas fa-plus mr-2"></i>Add Server
             </a>
         </div>
+
+        <!-- NEW: Hostname search -->
+        <form method="get" class="mt-4 flex items-center gap-2">
+            <div class="relative flex-1">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                <input
+                    type="text"
+                    name="search"
+                    value="{{ current_search }}"
+                    placeholder="Search by hostname, description or IP..."
+                    class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+            </div>
+            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                Search
+            </button>
+            {% if current_search %}
+            <a href="{% url 'server_list' %}" class="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                Clear
+            </a>
+            {% endif %}
+        </form>
+
+        {% if current_search %}
+        <p class="mt-2 text-sm text-gray-500">
+            Showing {{ servers|length }} result{{ servers|length|pluralize }} for "<strong>{{ current_search }}</strong>"
+        </p>
+        {% endif %}
     </div>
 
     <!-- Server Grid -->
@@ -80,7 +108,12 @@
         {% empty %}
         <div class="col-span-3 text-center py-12">
             <i class="fas fa-server text-4xl text-gray-400 mb-4"></i>
+            {% if current_search %}
+            <p class="text-gray-500 text-lg">No servers match "<strong>{{ current_search }}</strong>"</p>
+            <a href="{% url 'server_list' %}" class="inline-block mt-4 text-blue-600 hover:underline">Clear search</a>
+            {% else %}
             <p class="text-gray-500 text-lg">No servers found</p>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
@@ -90,7 +123,7 @@
     <div class="bg-white rounded-lg shadow p-4">
         <div class="flex justify-center space-x-2">
             {% if page_obj.has_previous %}
-            <a href="?page={{ page_obj.previous_page_number }}" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Previous</a>
+            <a href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page_obj.previous_page_number }}" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Previous</a>
             {% endif %}
             
             <span class="px-3 py-1 bg-blue-600 text-white rounded">
@@ -98,7 +131,7 @@
             </span>
             
             {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Next</a>
+            <a href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page_obj.next_page_number }}" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Next</a>
             {% endif %}
         </div>
     </div>
