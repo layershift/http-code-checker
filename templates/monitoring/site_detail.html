@@ -140,7 +140,6 @@
                     </div>
                     <div class="text-xs text-gray-500 mt-1">Overall</div>
                 </div>
-                {% for label, value in ""|make_list|slice:":0" %}{% endfor %}
                 <div class="col-span-4 space-y-2">
                     {% with sub_scores=latest_score %}
                     <div>
@@ -215,7 +214,22 @@
                 </div>
                 <div class="flex justify-between py-2 border-b">
                     <dt class="text-gray-600">Resolved IP</dt>
-                    <dd class="font-medium">{{ site.resolved_ip|default:"—" }}</dd>
+                    <dd class="font-medium flex items-center gap-2">
+                        {{ site.resolved_ip|default:"—" }}
+                        {% if site.resolved_ip %}
+                            {% if site.resolved_ip_is_ours %}
+                            <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800"
+                                  title="This IP belongs to our infrastructure">
+                                <i class="fas fa-home mr-1"></i>Ours
+                            </span>
+                            {% else %}
+                            <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-800"
+                                  title="This IP is not registered in our infrastructure">
+                                <i class="fas fa-external-link-alt mr-1"></i>External
+                            </span>
+                            {% endif %}
+                        {% endif %}
+                    </dd>
                 </div>
                 <div class="flex justify-between py-2 border-b">
                     <dt class="text-gray-600">Baseline Snapshot</dt>

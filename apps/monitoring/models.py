@@ -12,6 +12,8 @@ from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 import requests
 import logging
+from apps.infrastructure.utils import is_our_ip
+
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +116,10 @@ class Site(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     
+    @property
+    def resolved_ip_is_ours(self) -> bool:
+        return is_our_ip(self.resolved_ip)
+
     def resolve_ip(self):
         """
         Resolve the IPv4 address of the site
