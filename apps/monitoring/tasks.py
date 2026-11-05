@@ -92,6 +92,14 @@ def capture_screenshot_task(snapshot_id, site_name, site_id):
         
         # Get snapshot
         snapshot = SiteSnapshot.objects.get(id=snapshot_id)
+        # refresh ip 
+        try:
+            changed, new_ip = snapshot.site.refresh_resolved_ip()
+            if changed:
+                print(f"🔄 Resolved IP updated for {site_name}: {new_ip}")
+        except Exception as e:
+            print(f"⚠️ Could not refresh resolved IP for {site_name}: {e}")
+
         print(f"📸 Processing screenshot for {site_name}")
         
         # Create temp file
@@ -680,3 +688,337 @@ def list_all_jobs(request):
         result[name] = jobs
     
     return JsonResponse(result)
+
+
+# ===========================================================================
+# SERIAL SERVER-REPORT GATE
+# Runs on the single-worker 'server_reports' queue.
+# One job = one full report lifecycle (wait -> dispatch -> wait -> notify).
+# ===========================================================================
+
+import time
+from datetime import datetime
+from django.db import connection as _db_connection
+from rq import Worker
+from rq.job import Job
+from rq.registry import StartedJobRegistry, DeferredJobRegistry
+
+
+DEFAULT_QUEUE_NAME = 'default'
+
+
+def _default_queue_is_empty() -> bool:
+    """True iff nothing is queued, running, or deferred on the 'default' queue."""
+    q = get_queue(DEFAULT_QUEUE_NAME)
+    conn = q.connection
+
+    if q.count > 0:
+        return False
+
+    for worker in Worker.all(connection=conn):
+        if DEFAULT_QUEUE_NAME not in [w.name for w in worker.queues]:
+            continue
+        if worker.get_state() == 'busy':
+            return False
+        if worker.get_current_job_id():
+            return False
+
+    if StartedJobRegistry(queue=q).count > 0:
+        return False
+    if DeferredJobRegistry(queue=q).count > 0:
+        return False
+
+    return True
+
+
+def run_server_report(server_name=None, domain_name=None,
+                     ticket_id=None, message_id=None):
+    """
+    ONE job = ONE full report lifecycle.
+    Occupies the single 'server_reports' worker from start to Zulip post.
+    """
+    from .models import Site, Server, SiteSnapshot, ZulipMessage
+    from .util.evaluator import SiteEvaluator
+    from .utils import Notify
+
+    close_old_connections()
+    start_time = datetime.now()
+
+    zulip_msg = (
+        ZulipMessage.objects.filter(message_id=message_id).first()
+        if message_id else None
+    )
+
+    def set_status(status, **fields):
+        if not zulip_msg:
+            return
+        zulip_msg.status = status
+        for k, v in fields.items():
+            setattr(zulip_msg, k, v)
+        zulip_msg.save()
+
+    try:
+        # ---------- Phase 1: wait for default queue to drain ----------
+        set_status('waiting_for_queue')
+        waited = 0
+        GATE_TIMEOUT = 3600
+        while not _default_queue_is_empty():
+            if waited >= GATE_TIMEOUT:
+                set_status('failed', results_summary={'error': 'gate timeout'})
+                return {'status': 'failed', 'reason': 'gate_timeout'}
+            time.sleep(3)
+            waited += 3
+            close_old_connections()
+
+        # ---------- Phase 2: resolve target + dispatch ----------
+        set_status('processing')
+
+        if domain_name:
+            try:
+                sites = [Site.objects.get(name=domain_name.lower().strip())]
+            except Site.DoesNotExist:
+                set_status('failed', results_summary={'error': 'domain missing'})
+                return {'status': 'failed', 'reason': 'domain_missing'}
+            target = {'type': 'domain', 'name': sites[0].name, 'id': sites[0].id}
+        else:
+            try:
+                srv = Server.objects.get(name=server_name)
+            except Server.DoesNotExist:
+                set_status('failed', results_summary={'error': 'server missing'})
+                return {'status': 'failed', 'reason': 'server_missing'}
+            sites = list(srv.domains.filter(is_active=True))
+            target = {'type': 'server', 'name': srv.name, 'id': srv.id,
+                      'site_count': len(sites)}
+
+        if not sites:
+            set_status('completed',
+                       successful_sites=0, failed_sites=0, warning_sites=0,
+                       sites_processed=0, sites_pending=0,
+                       processed_at=timezone.now(),
+                       results_summary={'note': 'no active sites'})
+            return {'status': 'completed', 'note': 'no_active_sites'}
+
+        work_q = get_queue(DEFAULT_QUEUE_NAME)
+        sites_data = []
+        for site in sites:
+            snap = SiteSnapshot.objects.create(
+                site=site, http_status_code=0, content_length=0, ticket=ticket_id,
+            )
+            job = work_q.enqueue(
+                capture_screenshot_task,
+                snap.id, site.name, site.id,
+                job_timeout=1800,
+            )
+            sites_data.append({'name': site.name, 'jobs': {'screenshot': job.id}})
+
+        set_status('processing',
+                   total_sites=len(sites_data),
+                   sites_pending=len(sites_data),
+                   sites_processed=0)
+
+        # ---------- Phase 3: wait for snapshot jobs ----------
+        all_ids = [j for s in sites_data for j in s['jobs'].values()]
+        waited = 0
+        JOB_TIMEOUT = 3600
+        while waited < JOB_TIMEOUT:
+            done = 0
+            for jid in all_ids:
+                try:
+                    job = Job.fetch(jid, connection=work_q.connection)
+                    if job.get_status() in ('finished', 'failed'):
+                        done += 1
+                except Exception:
+                    done += 1
+            if done >= len(all_ids):
+                break
+            if zulip_msg:
+                zulip_msg.sites_processed = done
+                zulip_msg.sites_pending = len(all_ids) - done
+                zulip_msg.save(update_fields=[
+                    'sites_processed', 'sites_pending', 'updated_at'
+                ])
+            time.sleep(5)
+            waited += 5
+            close_old_connections()
+
+        duration = (datetime.now() - start_time).total_seconds()
+
+        # ---------- Phase 4: evaluate + notify ----------
+        return _run_evaluation_and_notify(
+            zulip_msg=zulip_msg,
+            target=target,
+            sites_data=sites_data,
+            duration=duration,
+            ticket_id=ticket_id,
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if zulip_msg:
+            from .models import ZulipMessage
+            ZulipMessage.objects.filter(message_id=message_id).update(
+                status='failed',
+                results_summary={'error': str(e)},
+            )
+        return {'status': 'failed', 'reason': str(e)}
+    finally:
+        _db_connection.close()
+
+
+def _run_evaluation_and_notify(zulip_msg, target, sites_data, duration, ticket_id=None):
+    """
+    Evaluate each site, send the Zulip message, update ZulipMessage.
+    Shared by run_server_report (and safe to use from wait_for_completion_and_notify).
+    """
+    from .util.evaluator import SiteEvaluator
+    from .utils import Notify
+
+    warning_lines = []
+    fail_lines = []
+
+    successful_count = 0
+    failed_count = 0
+    warning_count = 0
+    failed_sites_list = []
+    warning_sites_list = []
+
+    for site_info in sites_data:
+        site_name = site_info['name']
+        evaluator = SiteEvaluator(site_name)
+
+        if evaluator.is_valid():
+            passed, text = evaluator.get_monitoring_text(compact=False)
+
+            baseline_snapshot = evaluator.baseline_snapshot
+            latest_snapshot = evaluator.site.snapshots.first()
+
+            status_unchanged = True
+            ssim_bad = False
+
+            if baseline_snapshot and latest_snapshot:
+                if baseline_snapshot.http_status_code != latest_snapshot.http_status_code:
+                    status_unchanged = False
+
+            if evaluator.has_comparison() and evaluator.latest_comparison:
+                ssim = evaluator.latest_comparison.ssim_score
+                if ssim is not None and ssim < 0.90:
+                    ssim_bad = True
+
+            parts = text.split('|')
+            if len(parts) >= 6:
+                site_link   = parts[1].strip()
+                status_part = parts[2].strip()
+                ssim_part   = parts[3].strip()
+                score_part  = parts[4].strip()
+                change_part = parts[5].strip()
+            else:
+                site_link = site_name
+                status_part = ssim_part = score_part = change_part = "-"
+
+            if not status_unchanged:
+                fail_lines.append(
+                    f"| ❌ | {site_link} | {status_part} | {ssim_part} | {score_part} | {change_part} |"
+                )
+                failed_count += 1
+                failed_sites_list.append(site_name)
+            elif ssim_bad:
+                warning_lines.append(
+                    f"| ⚠️ | {site_link} | {status_part} | {ssim_part} | {score_part} | {change_part} |"
+                )
+                warning_count += 1
+                warning_sites_list.append(site_name)
+            else:
+                successful_count += 1
+        else:
+            fail_lines.append(
+                f"| ❌ {site_name} | Error: {evaluator.error} | - | - | - |"
+            )
+            failed_count += 1
+            failed_sites_list.append(site_name)
+
+    if failed_count > 0:
+        final_status = 'failed'
+    elif warning_count > 0:
+        final_status = 'partial'
+    else:
+        final_status = 'completed'
+
+    if zulip_msg:
+        zulip_msg.status = final_status
+        zulip_msg.successful_sites = successful_count
+        zulip_msg.failed_sites = failed_count
+        zulip_msg.warning_sites = warning_count
+        zulip_msg.sites_processed = len(sites_data)
+        zulip_msg.sites_pending = 0
+        zulip_msg.processed_at = timezone.now()
+        zulip_msg.results_summary = {
+            'failed_sites': failed_sites_list,
+            'warning_sites': warning_sites_list,
+            'successful_count': successful_count,
+            'duration_seconds': duration,
+        }
+        zulip_msg.save()
+
+    target_name = target.get('name', 'Unknown')
+    target_type = target.get('type', 'target')
+
+    monitoring_text = ""
+    if fail_lines:
+        monitoring_text += "\n\n❌ **FAILURES (Status Changes)**\n"
+        monitoring_text += "\n| Status | Site Name | Status | SSIM | Score | Change |\n"
+        monitoring_text += "| --- | --- | --- | --- | --- | ---\n"
+        monitoring_text += "\n".join(fail_lines)
+
+    if warning_lines:
+        monitoring_text += "\n\n⚠️ **WARNINGS (Visual Changes)**\n"
+        monitoring_text += "\n| Status | Site Name | Status | SSIM | Score | Change |\n"
+        monitoring_text += "| --- | --- | --- | --- | --- | ---\n"
+        monitoring_text += "\n".join(warning_lines)
+
+    header = (
+        f"📊 Monitoring Report for Server: {target_name}"
+        if target_type == 'server'
+        else f"📊 Monitoring Report for Domain: {target_name}"
+    )
+
+    if failed_count > 0:
+        overall_emoji, overall_status_text = "❌", "FAILURES DETECTED"
+    elif warning_count > 0:
+        overall_emoji, overall_status_text = "⚠️", "WARNINGS DETECTED"
+    else:
+        overall_emoji, overall_status_text = "✅", "PASS"
+
+    full_message = (
+        f"{header}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Sites: {len(sites_data)} | Duration: {duration:.1f}s\n"
+        f"Successful: {successful_count} | Failed: {failed_count} | Warnings: {warning_count}\n"
+        f"Overall Status: {overall_emoji} {overall_status_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+    full_message += monitoring_text
+    full_message += f"\n\n━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+    try:
+        if target_type == 'server':
+            title = f"[Server] {target_name}"
+        else:
+            title = f"[Domain] {target_name}"
+        if "stage.town" in target_name.lower():
+            Notify(target="stage").send(title=title, body=full_message)
+        elif target_type == 'server':
+            Notify(target="production").send(title=title, body=full_message)
+        else:
+            Notify(target="domain").send(title=title, body=full_message)
+    except Exception as e:
+        print(f"❌ Failed to send notification: {e}")
+        print(full_message)
+
+    return {
+        'status': final_status,
+        'successful': successful_count,
+        'failed': failed_count,
+        'warnings': warning_count,
+        'duration': duration,
+    }

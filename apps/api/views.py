@@ -1900,6 +1900,8 @@ def dispatch_comparison(request):
         queue = get_queue('default')
         
         # CASE 1: Monitor a specific domain
+        site = None
+        server = None
         if domain_name:
             try:
                 site = Site.objects.get(name=domain_name.lower().strip())
@@ -1908,14 +1910,6 @@ def dispatch_comparison(request):
                     'name': site.name,
                     'id': site.id
                 }
-                
-                # Create and enqueue jobs for this site
-                job_ids = enqueue_site_monitoring(site, queue, ticket_id=ticket_id)
-                
-                results['sites'].append({
-                    'name': site.name,
-                    'jobs': job_ids
-                })
                 
             except Site.DoesNotExist:
                 return JsonResponse({
@@ -1936,14 +1930,6 @@ def dispatch_comparison(request):
                     'site_count': sites.count()
                 }
                 
-                for site in sites:
-                    job_ids = enqueue_site_monitoring(site, queue, ticket_id=ticket_id)
-                    
-                    results['sites'].append({
-                        'name': site.name,
-                        'jobs': job_ids
-                    })
-                
             except Server.DoesNotExist:
                 return JsonResponse({
                     'status': 'error',
@@ -1962,24 +1948,42 @@ def dispatch_comparison(request):
             site=site if domain_name else None,
             title=f"Monitoring: {server_name or domain_name}",
             status='pending',
-            total_sites=len(results['sites']),
-            sites_pending=len(results['sites']),
+            total_sites=(
+                results['target'].get('site_count', 0) if server_name
+                else (1 if domain_name else 0)
+            ),
+            sites_pending=(
+                results['target'].get('site_count', 0) if server_name
+                else (1 if domain_name else 0)
+            ),
             ticket_id=ticket_id,
             source='api'
         )
         print(f"📝 Created Zulip tracking message: {message_id}")
-        thread = threading.Thread(
-            target=wait_for_completion_and_notify,
-            args=(results['target'], results['sites'], results['start_time'], message_id)
+
+        # Enqueue the report onto the serial 'server_reports' queue.
+        # The single worker on that queue stays active for the entire run:
+        # wait for default to drain -> dispatch snapshots -> wait -> notify.
+        from apps.monitoring.tasks import run_server_report
+        gate_queue = get_queue('server_reports')
+        gate_queue.enqueue(
+            run_server_report,
+            server_name=server_name,
+            domain_name=domain_name,
+            ticket_id=ticket_id,
+            message_id=message_id,
+            job_timeout=10800,
+            job_id=f"server_report_{message_id}",
         )
-        thread.daemon = True
-        thread.start()
+        print(f"🚦 Enqueued server_report_{message_id} on server_reports (pos={gate_queue.count})")
         
         # Return immediate response
         response = {
             'status': 'success',
             'message': f'Monitoring dispatched for {len(results["sites"])} site(s)',
             'target': results['target'],
+            'message_id': message_id,
+            'queue_position': gate_queue.count,
             'notification': 'Success message will be sent when all jobs complete'
         }
         

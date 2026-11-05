@@ -12,6 +12,8 @@ from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 import requests
 import logging
+from apps.infrastructure.utils import is_our_ip
+
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +115,11 @@ class Site(models.Model):
         )
 
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
+    @property
+    def resolved_ip_is_ours(self) -> bool:
+        return is_our_ip(self.resolved_ip)
+
     def resolve_ip(self):
         """
         Resolve the IPv4 address of the site
@@ -131,6 +137,24 @@ class Site(models.Model):
         except Exception as e:
             print(f"Error resolving IP for {self.name}: {e}")
             return None
+        
+    def refresh_resolved_ip(self):
+        """
+        Re-resolve via resolve_ip() and persist only on change.
+        Returns (changed: bool, new_ip: str | None).
+        """
+        old_ip = self.resolved_ip          # snapshot BEFORE resolve_ip mutates it
+        new_ip = self.resolve_ip()         # this also sets self.resolved_ip in memory
+
+        if new_ip and new_ip != old_ip:
+            self.resolved_ip = new_ip
+            self.save(update_fields=["resolved_ip"])
+            return True, new_ip
+
+        # No change: keep whatever resolve_ip set, but restore if it came back None
+        if new_ip is None and old_ip is not None:
+            self.resolved_ip = old_ip      # don't lose a previously-known IP
+        return False, new_ip
     
     def get_absolute_url(self):
         return reverse('site_detail', args=[str(self.id)])

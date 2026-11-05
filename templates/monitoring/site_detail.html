@@ -4,301 +4,342 @@
 {% block title %}{{ site.name }} - Site Details{% endblock %}
 
 {% block content %}
+{% with live_url="https://"|add:site.name %}
 <div class="space-y-6">
-    <!-- Header with Score Navigation -->
+
+    <!-- ================================================================
+         HEADER: identity + meta + actions
+         ================================================================ -->
     <div class="bg-white rounded-lg shadow p-6">
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-                <h2 class="text-2xl font-bold text-gray-800">{{ site.name }}</h2>
-                <p class="text-gray-600">Created: {{ site.created_at|date:"F j, Y" }}</p>
-            </div>
-            
-            <!-- Action Buttons -->
-            <div class="flex flex-wrap gap-2">
-                <!-- New Snapshot Button -->
-                <button onclick="triggerNewSnapshot()" 
-                        class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
-                    <i class="fas fa-camera mr-2"></i>
-                    New Snapshot
-                </button>
-                
-                <!-- Score History Button -->
-                <a href="{% url 'site_score_history' site.id %}" 
-                   class="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">
-                    <i class="fas fa-chart-line mr-2"></i>
-                    Score History
-                    {% if score_count > 0 %}
-                    <span class="ml-2 bg-white text-purple-600 px-2 py-0.5 rounded-full text-xs font-bold">
-                        {{ score_count }}
+            <div class="min-w-0">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-2xl font-bold text-gray-800 truncate">{{ site.name }}</h2>
+                    <span class="px-2 py-0.5 text-xs font-medium rounded-full {% if site.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                        {{ site.is_active|yesno:"Active,Inactive" }}
                     </span>
+                </div>
+                <div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500">
+                    {% if site.server %}
+                    <span>
+                        <i class="fas fa-server mr-1"></i>
+                        <a href="{% url 'server_detail' site.server.pk %}" class="text-blue-600 hover:underline">
+                            {{ site.server.name }}
+                        </a>
+                    </span>
+                    {% else %}
+                    <span><i class="fas fa-server mr-1"></i>No server</span>
+                    {% endif %}
+                    <span><i class="far fa-calendar mr-1"></i>Created {{ site.created_at|date:"M j, Y" }}</span>
+                    {% if latest_snapshot %}
+                    <span><i class="far fa-clock mr-1"></i>Last snapshot {{ latest_snapshot.taken_at|timesince }} ago</span>
+                    {% endif %}
+                    {% if latest_score %}
+                    <span><i class="fas fa-star mr-1"></i>Score {{ latest_score.overall_score|floatformat:0 }}/100 ({{ latest_score.calculated_at|timesince }} ago)</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2">
+                <a href="{{ live_url }}" target="_blank" rel="noopener noreferrer"
+                   class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-external-link-alt mr-2"></i>Open Site
+                </a>
+                <button onclick="triggerNewSnapshot()"
+                        class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-camera mr-2"></i>New Snapshot
+                </button>
+                <a href="{% url 'site_score_history' site.id %}"
+                   class="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">
+                    <i class="fas fa-chart-line mr-2"></i>Score History
+                    {% if score_count > 0 %}
+                    <span class="ml-2 bg-white text-purple-600 px-2 py-0.5 rounded-full text-xs font-bold">{{ score_count }}</span>
                     {% endif %}
                 </a>
-                
-                <!-- Current Score Badge (if available) -->
-                {% if latest_score %}
-                <div class="inline-flex items-center px-4 py-2 {% if latest_score.overall_score > 80 %}bg-green-100 text-green-800{% elif latest_score.overall_score > 60 %}bg-yellow-100 text-yellow-800{% else %}bg-red-100 text-red-800{% endif %} rounded-lg">
-                    <i class="fas fa-star mr-2"></i>
-                    <span class="font-semibold">Score: {{ latest_score.overall_score|floatformat:0 }}</span>
-                </div>
-                {% endif %}
-                
-                <!-- Back Button -->
-                <a href="{% url 'site_list' %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">
+                <a href="{% url 'site_list' %}"
+                   class="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">
                     <i class="fas fa-arrow-left mr-2"></i>Back
                 </a>
             </div>
         </div>
-        
-        <!-- Quick Score Summary (if available) -->
-        {% if latest_score %}
-        <div class="mt-4 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-            <div class="text-center p-2 bg-gray-50 rounded">
-                <span class="text-gray-600">Performance</span>
-                <div class="font-semibold {% if latest_score.performance_score > 80 %}text-green-600{% elif latest_score.performance_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                    {{ latest_score.performance_score|floatformat:0|default:"-" }}
-                </div>
-            </div>
-            <div class="text-center p-2 bg-gray-50 rounded">
-                <span class="text-gray-600">SEO</span>
-                <div class="font-semibold {% if latest_score.seo_score > 80 %}text-green-600{% elif latest_score.seo_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                    {{ latest_score.seo_score|floatformat:0|default:"-" }}
-                </div>
-            </div>
-            <div class="text-center p-2 bg-gray-50 rounded">
-                <span class="text-gray-600">Security</span>
-                <div class="font-semibold {% if latest_score.security_score > 80 %}text-green-600{% elif latest_score.security_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                    {{ latest_score.security_score|floatformat:0|default:"-" }}
-                </div>
-            </div>
-            <div class="text-center p-2 bg-gray-50 rounded">
-                <span class="text-gray-600">Availability</span>
-                <div class="font-semibold {% if latest_score.availability_score > 80 %}text-green-600{% elif latest_score.availability_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                    {{ latest_score.availability_score|floatformat:0|default:"-" }}
-                </div>
-            </div>
-            <div class="text-center p-2 bg-gray-50 rounded">
-                <span class="text-gray-600">Last Check</span>
-                <div class="font-semibold text-gray-700">
-                    {{ latest_score.calculated_at|timesince }} ago
-                </div>
-            </div>
+
+        <!-- URL chip (copyable) -->
+        <div class="mt-4 flex items-center gap-2 text-sm">
+            <span class="text-gray-500">URL:</span>
+            <code class="px-2 py-1 bg-gray-50 border rounded text-gray-700 truncate">{{ live_url }}</code>
+            <button onclick="navigator.clipboard.writeText('{{ live_url }}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)"
+                    class="text-blue-600 hover:text-blue-800 text-xs">Copy</button>
         </div>
-        {% endif %}
     </div>
 
-    <!-- Site Information -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <!-- Server Info -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h3 class="text-lg font-semibold text-gray-800 mb-4">Server Information</h3>
-            <div class="space-y-3">
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">Server Name:</span>
-                    {% if site.server %}
-                    <a href="{% url 'server_detail' site.server.pk %}" class="text-blue-600 hover:text-blue-800 font-medium">
-                        {{ site.server.name }}
-                    </a>
-                    {% else %}
-                    <span class="font-medium text-gray-400">Not assigned</span>
-                    {% endif %}
-                </div>
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">Server IP:</span>
-                    <span class="font-medium">{{ site.server_ip|default:"Not assigned" }}</span>
-                </div>
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">Resolved IP:</span>
-                    <span class="font-medium">{{ site.resolved_ip|default:"Not resolved" }}</span>
-                </div>
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">Status:</span>
-                    <span class="px-2 py-1 text-xs font-medium rounded-full {% if site.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
-                        {{ site.is_active|yesno:"Active,Inactive" }}
-                    </span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Latest Snapshot -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <h3 class="text-lg font-semibold text-gray-800 mb-4">Latest Snapshot</h3>
-            {% with latest_snapshot=snapshots.first %}
+    <!-- ================================================================
+         KPI STRIP
+         ================================================================ -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-lg shadow p-4 text-center">
+            <div class="text-xs uppercase tracking-wide text-gray-500">HTTP Status</div>
             {% if latest_snapshot %}
-            <div class="space-y-3">
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">HTTP Status:</span>
-                    <span class="font-medium px-2 py-1 rounded-full
-                        {% if latest_snapshot.http_status_code == 200 %}bg-green-100 text-green-800
-                        {% elif latest_snapshot.http_status_code >= 400 %}bg-red-100 text-red-800
-                        {% else %}bg-yellow-100 text-yellow-800{% endif %}">
-                        {{ latest_snapshot.http_status_code }}
-                    </span>
-                </div>
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">Taken at:</span>
-                    <span class="font-medium">{{ latest_snapshot.taken_at|date:"Y-m-d H:i:s" }}</span>
-                </div>
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">Time ago:</span>
-                    <span class="font-medium">{{ latest_snapshot.taken_at|timesince }} ago</span>
-                </div>
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">Content Length:</span>
-                    <span class="font-medium">{{ latest_snapshot.content_length|default:"0" }} bytes</span>
-                </div>
-                <div class="flex justify-between py-2 border-b">
-                    <span class="text-gray-600">Is Baseline:</span>
-                    <span class="font-medium">{{ latest_snapshot.is_baseline|yesno:"Yes,No" }}</span>
-                </div>
-                {% if latest_snapshot.screenshot %}
-                <div class="mt-4">
-                    <button onclick="openImageModal('{{ latest_snapshot.screenshot.url }}', 'Latest screenshot taken at {{ latest_snapshot.taken_at|date:"Y-m-d H:i:s" }}')" 
-                            class="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                        <i class="fas fa-image mr-1"></i>View Latest Screenshot
-                    </button>
-                </div>
-                {% endif %}
+            <div class="mt-1 text-2xl font-bold
+                {% if latest_snapshot.http_status_code == 200 %}text-green-600
+                {% elif latest_snapshot.http_status_code >= 400 %}text-red-600
+                {% else %}text-yellow-600{% endif %}">
+                {{ latest_snapshot.http_status_code }}
             </div>
             {% else %}
-            <p class="text-gray-500 text-center py-4">No snapshots available</p>
+            <div class="mt-1 text-2xl font-bold text-gray-400">—</div>
             {% endif %}
-            {% endwith %}
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 text-center">
+            <div class="text-xs uppercase tracking-wide text-gray-500">Last Snapshot</div>
+            <div class="mt-1 text-lg font-semibold text-gray-800">
+                {% if latest_snapshot %}{{ latest_snapshot.taken_at|timesince }} ago{% else %}—{% endif %}
+            </div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 text-center">
+            <div class="text-xs uppercase tracking-wide text-gray-500">Overall Score</div>
+            {% if latest_score %}
+            <div class="mt-1 text-2xl font-bold
+                {% if latest_score.overall_score > 80 %}text-green-600
+                {% elif latest_score.overall_score > 60 %}text-yellow-600
+                {% else %}text-red-600{% endif %}">
+                {{ latest_score.overall_score|floatformat:0 }}
+            </div>
+            {% else %}
+            <div class="mt-1 text-2xl font-bold text-gray-400">—</div>
+            {% endif %}
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 text-center">
+            <div class="text-xs uppercase tracking-wide text-gray-500">Content Size</div>
+            <div class="mt-1 text-lg font-semibold text-gray-800">
+                {% if latest_snapshot.content_length %}{{ latest_snapshot.content_length|filesizeformat }}{% else %}—{% endif %}
+            </div>
         </div>
     </div>
 
-    <!-- ===== BASELINE VS LATEST HEAD-TO-HEAD COMPARISON ===== -->
+    <!-- ================================================================
+         SCORE + SERVER INFO (two columns)
+         ================================================================ -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Score Card -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold text-gray-800">Quality Score</h3>
+                <a href="{% url 'site_score_history' site.id %}" class="text-sm text-purple-600 hover:underline">
+                    History ({{ score_count }}) →
+                </a>
+            </div>
+            {% if latest_score %}
+            <div class="grid grid-cols-5 gap-3 items-end">
+                <div class="text-center">
+                    <div class="text-3xl font-bold
+                        {% if latest_score.overall_score > 80 %}text-green-600
+                        {% elif latest_score.overall_score > 60 %}text-yellow-600
+                        {% else %}text-red-600{% endif %}">
+                        {{ latest_score.overall_score|floatformat:0 }}
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1">Overall</div>
+                </div>
+                <div class="col-span-4 space-y-2">
+                    {% with sub_scores=latest_score %}
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-600 mb-0.5">
+                            <span>Performance</span>
+                            <span class="font-semibold">{{ sub_scores.performance_score|floatformat:0|default:"-" }}</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-1.5">
+                            <div class="h-1.5 rounded-full {% if sub_scores.performance_score > 80 %}bg-green-600{% elif sub_scores.performance_score > 60 %}bg-yellow-600{% else %}bg-red-600{% endif %}"
+                                 style="width: {{ sub_scores.performance_score|default:0 }}%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-600 mb-0.5">
+                            <span>SEO</span>
+                            <span class="font-semibold">{{ sub_scores.seo_score|floatformat:0|default:"-" }}</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-1.5">
+                            <div class="h-1.5 rounded-full {% if sub_scores.seo_score > 80 %}bg-green-600{% elif sub_scores.seo_score > 60 %}bg-yellow-600{% else %}bg-red-600{% endif %}"
+                                 style="width: {{ sub_scores.seo_score|default:0 }}%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-600 mb-0.5">
+                            <span>Security</span>
+                            <span class="font-semibold">{{ sub_scores.security_score|floatformat:0|default:"-" }}</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-1.5">
+                            <div class="h-1.5 rounded-full {% if sub_scores.security_score > 80 %}bg-green-600{% elif sub_scores.security_score > 60 %}bg-yellow-600{% else %}bg-red-600{% endif %}"
+                                 style="width: {{ sub_scores.security_score|default:0 }}%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-600 mb-0.5">
+                            <span>Availability</span>
+                            <span class="font-semibold">{{ sub_scores.availability_score|floatformat:0|default:"-" }}</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-1.5">
+                            <div class="h-1.5 rounded-full {% if sub_scores.availability_score > 80 %}bg-green-600{% elif sub_scores.availability_score > 60 %}bg-yellow-600{% else %}bg-red-600{% endif %}"
+                                 style="width: {{ sub_scores.availability_score|default:0 }}%"></div>
+                        </div>
+                    </div>
+                    {% endwith %}
+                </div>
+            </div>
+            <p class="mt-4 text-xs text-gray-500">Last measured {{ latest_score.calculated_at|timesince }} ago</p>
+            {% else %}
+            <div class="text-center py-6">
+                <i class="fas fa-chart-line text-3xl text-gray-300 mb-2"></i>
+                <p class="text-gray-500 text-sm">No score data yet — will appear after the next snapshot.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Server & DNS Card -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Server & DNS</h3>
+            <dl class="space-y-3 text-sm">
+                <div class="flex justify-between py-2 border-b">
+                    <dt class="text-gray-600">Server</dt>
+                    <dd class="font-medium">
+                        {% if site.server %}
+                        <a href="{% url 'server_detail' site.server.pk %}" class="text-blue-600 hover:underline">
+                            {{ site.server.name }} <i class="fas fa-arrow-right text-xs"></i>
+                        </a>
+                        {% else %}<span class="text-gray-400">Not assigned</span>{% endif %}
+                    </dd>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <dt class="text-gray-600">Server IP</dt>
+                    <dd class="font-medium">{{ site.server_ip|default:"—" }}</dd>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <dt class="text-gray-600">Resolved IP</dt>
+                    <dd class="font-medium flex items-center gap-2">
+                        {{ site.resolved_ip|default:"—" }}
+                        {% if site.resolved_ip %}
+                            {% if site.resolved_ip_is_ours %}
+                            <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800"
+                                  title="This IP belongs to our infrastructure">
+                                <i class="fas fa-home mr-1"></i>Ours
+                            </span>
+                            {% else %}
+                            <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-800"
+                                  title="This IP is not registered in our infrastructure">
+                                <i class="fas fa-external-link-alt mr-1"></i>External
+                            </span>
+                            {% endif %}
+                        {% endif %}
+                    </dd>
+                </div>
+                <div class="flex justify-between py-2 border-b">
+                    <dt class="text-gray-600">Baseline Snapshot</dt>
+                    <dd class="font-medium">
+                        {% with baseline=snapshots|dictsortreversed:"is_baseline"|first %}
+                        {% if baseline and baseline.is_baseline %}
+                        #{{ baseline.id }} · {{ baseline.taken_at|date:"Y-m-d H:i" }}
+                        {% else %}
+                        <span class="text-gray-400">Not set</span>
+                        {% endif %}
+                        {% endwith %}
+                    </dd>
+                </div>
+                <div class="flex justify-between py-2">
+                    <dt class="text-gray-600">Total Snapshots</dt>
+                    <dd class="font-medium">{{ snapshots|length }}</dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         BASELINE vs LATEST
+         ================================================================ -->
     {% with baseline_snapshot=site.snapshots.filter|dictsortreversed:"is_baseline"|first %}
     {% with latest_snapshot=snapshots.first %}
     {% if baseline_snapshot and latest_snapshot and baseline_snapshot.id != latest_snapshot.id %}
     {% with comparison=site.comparisons.first %}
     <div class="bg-white rounded-lg shadow p-6">
-        <h3 class="text-lg font-semibold text-gray-800 mb-4">Baseline vs Latest Comparison</h3>
-        
-        <!-- Comparison Metrics Card -->
-        {% if comparison %}
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-                <div class="text-sm text-gray-600">SSIM Score</div>
-                <div class="text-2xl font-bold {% if comparison.ssim_score > 0.95 %}text-green-600{% elif comparison.ssim_score > 0.8 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                    {{ comparison.ssim_score|floatformat:3 }}
-                </div>
+        <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Baseline vs Latest</h3>
+            {% if comparison %}
+            <div class="flex flex-wrap gap-2 text-xs">
+                <span class="px-2 py-1 rounded bg-gray-100 text-gray-700">
+                    SSIM <strong class="{% if comparison.ssim_score > 0.95 %}text-green-600{% elif comparison.ssim_score > 0.8 %}text-yellow-600{% else %}text-red-600{% endif %}">{{ comparison.ssim_score|floatformat:3 }}</strong>
+                </span>
+                <span class="px-2 py-1 rounded bg-gray-100 text-gray-700">
+                    Change <strong class="{% if comparison.percent_difference < 5 %}text-green-600{% elif comparison.percent_difference < 15 %}text-yellow-600{% else %}text-red-600{% endif %}">{{ comparison.percent_difference|floatformat:1 }}%</strong>
+                </span>
+                <span class="px-2 py-1 rounded bg-gray-100 text-gray-700">
+                    Pixels <strong>{{ comparison.changed_pixels }}/{{ comparison.total_pixels }}</strong>
+                </span>
             </div>
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-                <div class="text-sm text-gray-600">Change %</div>
-                <div class="text-2xl font-bold {% if comparison.percent_difference < 5 %}text-green-600{% elif comparison.percent_difference < 15 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                    {{ comparison.percent_difference|floatformat:1 }}%
-                </div>
-            </div>
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-                <div class="text-sm text-gray-600">Changed Pixels</div>
-                <div class="text-2xl font-bold">{{ comparison.changed_pixels }}</div>
-            </div>
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-                <div class="text-sm text-gray-600">Total Pixels</div>
-                <div class="text-2xl font-bold">{{ comparison.total_pixels }}</div>
-            </div>
+            {% endif %}
         </div>
-        {% endif %}
-        
-        <!-- Side-by-side images with highlighting -->
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <!-- Latest - LEFT side with green highlight -->
-            <div class="border-2 border-green-300 rounded-lg overflow-hidden shadow-lg">
-                <div class="bg-green-100 px-4 py-2 border-b border-green-300">
-                    <h4 class="font-semibold text-green-800">📸 Latest Snapshot</h4>
-                    <p class="text-xs text-green-600">{{ latest_snapshot.taken_at|date:"Y-m-d H:i:s" }}</p>
+            <!-- Baseline -->
+            <div class="border-2 border-purple-300 rounded-lg overflow-hidden">
+                <div class="bg-purple-100 px-4 py-2 border-b border-purple-300 flex justify-between items-center">
+                    <h4 class="font-semibold text-purple-800 text-sm"><i class="fas fa-star mr-1"></i>Baseline</h4>
+                    <span class="text-xs text-purple-700">{{ baseline_snapshot.taken_at|date:"Y-m-d H:i" }}</span>
                 </div>
-                <div class="p-4 bg-green-50">
-                    {% if latest_snapshot.screenshot %}
-                    <img src="{{ latest_snapshot.screenshot.url }}" 
-                         alt="Latest screenshot"
-                         class="w-full h-auto rounded border border-green-300 cursor-pointer"
-                         onclick="openImageModal('{{ latest_snapshot.screenshot.url }}', 'Latest: {{ latest_snapshot.taken_at|date:"Y-m-d H:i:s" }}')">
-                    <div class="mt-2 text-center">
-                        <span class="inline-block bg-green-600 text-white text-xs px-2 py-1 rounded-full">
-                            <i class="fas fa-clock mr-1"></i>{{ latest_snapshot.taken_at|timesince }} ago
-                        </span>
-                    </div>
-                    {% else %}
-                    <div class="bg-gray-200 h-48 flex items-center justify-center rounded">
-                        <span class="text-gray-500">No screenshot</span>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-            
-            <!-- Baseline - RIGHT side with purple highlight -->
-            <div class="border-2 border-purple-300 rounded-lg overflow-hidden shadow-lg">
-                <div class="bg-purple-100 px-4 py-2 border-b border-purple-300">
-                    <h4 class="font-semibold text-purple-800">⭐ Baseline Snapshot</h4>
-                    <p class="text-xs text-purple-600">{{ baseline_snapshot.taken_at|date:"Y-m-d H:i:s" }}</p>
-                </div>
-                <div class="p-4 bg-purple-50">
+                <div class="p-3 bg-purple-50">
                     {% if baseline_snapshot.screenshot %}
-                    <img src="{{ baseline_snapshot.screenshot.url }}" 
-                         alt="Baseline screenshot"
-                         class="w-full h-auto rounded border border-purple-300 cursor-pointer"
+                    <img src="{{ baseline_snapshot.screenshot.url }}" alt="Baseline screenshot"
+                         class="w-full h-auto rounded cursor-pointer"
                          onclick="openImageModal('{{ baseline_snapshot.screenshot.url }}', 'Baseline: {{ baseline_snapshot.taken_at|date:"Y-m-d H:i:s" }}')">
-                    <div class="mt-2 text-center">
-                        <span class="inline-block bg-purple-600 text-white text-xs px-2 py-1 rounded-full">
-                            <i class="fas fa-star mr-1"></i>Baseline
-                        </span>
-                    </div>
                     {% else %}
-                    <div class="bg-gray-200 h-48 flex items-center justify-center rounded">
-                        <span class="text-gray-500">No screenshot</span>
-                    </div>
+                    <div class="bg-gray-200 h-48 flex items-center justify-center rounded text-gray-500">No screenshot</div>
+                    {% endif %}
+                </div>
+            </div>
+            <!-- Latest -->
+            <div class="border-2 border-green-300 rounded-lg overflow-hidden">
+                <div class="bg-green-100 px-4 py-2 border-b border-green-300 flex justify-between items-center">
+                    <h4 class="font-semibold text-green-800 text-sm"><i class="fas fa-clock mr-1"></i>Latest</h4>
+                    <span class="text-xs text-green-700">{{ latest_snapshot.taken_at|date:"Y-m-d H:i" }} ({{ latest_snapshot.taken_at|timesince }} ago)</span>
+                </div>
+                <div class="p-3 bg-green-50">
+                    {% if latest_snapshot.screenshot %}
+                    <img src="{{ latest_snapshot.screenshot.url }}" alt="Latest screenshot"
+                         class="w-full h-auto rounded cursor-pointer"
+                         onclick="openImageModal('{{ latest_snapshot.screenshot.url }}', 'Latest: {{ latest_snapshot.taken_at|date:"Y-m-d H:i:s" }}')">
+                    {% else %}
+                    <div class="bg-gray-200 h-48 flex items-center justify-center rounded text-gray-500">No screenshot</div>
                     {% endif %}
                 </div>
             </div>
         </div>
-        
-        <!-- Heatmap and Difference Images with Change % Header -->
-        {% if comparison %}
-        {% if comparison.heatmap or comparison.diff_image %}
-        <div class="mt-6">
-            <div class="flex justify-between items-center mb-3">
-                <h4 class="font-semibold text-gray-700">Visual Changes</h4>
-                <div class="bg-gray-100 rounded-lg px-4 py-2">
-                    <span class="text-sm text-gray-600">Change: </span>
-                    <span class="text-xl font-bold {% if comparison.percent_difference < 5 %}text-green-600{% elif comparison.percent_difference < 15 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                        {{ comparison.percent_difference|floatformat:1 }}%
-                    </span>
+
+        {% if comparison and comparison.heatmap or comparison.diff_image %}
+        <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            {% if comparison.heatmap %}
+            <div class="border rounded-lg overflow-hidden">
+                <div class="bg-gray-100 px-4 py-2 border-b">
+                    <h5 class="font-medium text-gray-700 text-sm">Heatmap</h5>
+                    <p class="text-xs text-gray-500">Red = more change</p>
+                </div>
+                <div class="p-3">
+                    <img src="{{ comparison.heatmap.url }}" alt="Heatmap"
+                         class="w-full h-auto rounded border cursor-pointer"
+                         onclick="openImageModal('{{ comparison.heatmap.url }}', 'Heatmap — {{ comparison.percent_difference|floatformat:1 }}% change')">
                 </div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {% if comparison.heatmap %}
-                <div class="border rounded-lg overflow-hidden">
-                    <div class="bg-gray-100 px-4 py-2 border-b">
-                        <h5 class="font-medium text-gray-700">Heatmap</h5>
-                        <p class="text-xs text-gray-500">Red = more change | {{ comparison.percent_difference|floatformat:1 }}% change</p>
-                    </div>
-                    <div class="p-4">
-                        <img src="{{ comparison.heatmap.url }}" 
-                             alt="Heatmap"
-                             class="w-full h-auto rounded border cursor-pointer"
-                             onclick="openImageModal('{{ comparison.heatmap.url }}', 'Heatmap - {{ comparison.percent_difference|floatformat:1 }}% change')">
-                    </div>
+            {% endif %}
+            {% if comparison.diff_image %}
+            <div class="border rounded-lg overflow-hidden">
+                <div class="bg-gray-100 px-4 py-2 border-b">
+                    <h5 class="font-medium text-gray-700 text-sm">Difference Overlay</h5>
+                    <p class="text-xs text-gray-500">Red = changed pixels</p>
                 </div>
-                {% endif %}
-                
-                {% if comparison.diff_image %}
-                <div class="border rounded-lg overflow-hidden">
-                    <div class="bg-gray-100 px-4 py-2 border-b">
-                        <h5 class="font-medium text-gray-700">Difference Overlay</h5>
-                        <p class="text-xs text-gray-500">Red = changed pixels | {{ comparison.percent_difference|floatformat:1 }}% change</p>
-                    </div>
-                    <div class="p-4">
-                        <img src="{{ comparison.diff_image.url }}" 
-                             alt="Difference overlay"
-                             class="w-full h-auto rounded border cursor-pointer"
-                             onclick="openImageModal('{{ comparison.diff_image.url }}', 'Difference overlay - {{ comparison.percent_difference|floatformat:1 }}% change')">
-                    </div>
+                <div class="p-3">
+                    <img src="{{ comparison.diff_image.url }}" alt="Difference"
+                         class="w-full h-auto rounded border cursor-pointer"
+                         onclick="openImageModal('{{ comparison.diff_image.url }}', 'Difference — {{ comparison.percent_difference|floatformat:1 }}% change')">
                 </div>
-                {% endif %}
             </div>
+            {% endif %}
         </div>
-        {% endif %}
         {% endif %}
     </div>
     {% endwith %}
@@ -306,243 +347,125 @@
     {% endwith %}
     {% endwith %}
 
-    <!-- Score Card -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h3 class="text-lg font-semibold text-gray-800 mb-4">Site Quality Score</h3>
-        
-        {% if latest_score %}
-        <div class="space-y-4">
-            <!-- Overall Score -->
-            <div class="text-center">
-                <div class="text-4xl font-bold {% if latest_score.overall_score > 80 %}text-green-600{% elif latest_score.overall_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                    {{ latest_score.overall_score|floatformat:0 }}
-                </div>
-                <div class="text-sm text-gray-500">Overall Score</div>
-            </div>
-            
-            <!-- Score Breakdown -->
-            <div class="space-y-2">
-                <div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-gray-600">Performance</span>
-                        <span class="font-semibold {% if latest_score.performance_score > 80 %}text-green-600{% elif latest_score.performance_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                            {{ latest_score.performance_score|floatformat:0 }}
-                        </span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div class="h-2 rounded-full {% if latest_score.performance_score > 80 %}bg-green-600{% elif latest_score.performance_score > 60 %}bg-yellow-600{% else %}bg-red-600{% endif %}" 
-                             style="width: {{ latest_score.performance_score|default:0 }}%"></div>
-                    </div>
-                </div>
-                
-                <div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-gray-600">SEO</span>
-                        <span class="font-semibold {% if latest_score.seo_score > 80 %}text-green-600{% elif latest_score.seo_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                            {{ latest_score.seo_score|floatformat:0 }}
-                        </span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div class="h-2 rounded-full {% if latest_score.seo_score > 80 %}bg-green-600{% elif latest_score.seo_score > 60 %}bg-yellow-600{% else %}bg-red-600{% endif %}" 
-                             style="width: {{ latest_score.seo_score|default:0 }}%"></div>
-                    </div>
-                </div>
-                
-                <div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-gray-600">Security</span>
-                        <span class="font-semibold {% if latest_score.security_score > 80 %}text-green-600{% elif latest_score.security_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                            {{ latest_score.security_score|floatformat:0 }}
-                        </span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div class="h-2 rounded-full {% if latest_score.security_score > 80 %}bg-green-600{% elif latest_score.security_score > 60 %}bg-yellow-600{% else %}bg-red-600{% endif %}" 
-                             style="width: {{ latest_score.security_score|default:0 }}%"></div>
-                    </div>
-                </div>
-                
-                <div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-gray-600">Availability</span>
-                        <span class="font-semibold {% if latest_score.availability_score > 80 %}text-green-600{% elif latest_score.availability_score > 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                            {{ latest_score.availability_score|floatformat:0 }}
-                        </span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div class="h-2 rounded-full {% if latest_score.availability_score > 80 %}bg-green-600{% elif latest_score.availability_score > 60 %}bg-yellow-600{% else %}bg-red-600{% endif %}" 
-                             style="width: {{ latest_score.availability_score|default:0 }}%"></div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- View Full History Link -->
-            <a href="{% url 'site_score_history' site.id %}" 
-               class="block text-center bg-purple-50 text-purple-700 px-4 py-2 rounded-lg hover:bg-purple-100 transition">
-                <i class="fas fa-chart-line mr-2"></i>View Full Score History
-                {% if score_count > 1 %}
-                <span class="ml-1 text-xs">({{ score_count }} records)</span>
-                {% endif %}
-            </a>
-        </div>
-        {% else %}
-        <div class="text-center py-6">
-            <i class="fas fa-chart-line text-4xl text-gray-300 mb-3"></i>
-            <p class="text-gray-500">No score data yet</p>
-            <p class="text-sm text-gray-400 mt-1">Scores will appear after next snapshot</p>
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- Screenshots Gallery Section -->
+    <!-- ================================================================
+         SCREENSHOT GALLERY (recent 6)
+         ================================================================ -->
     {% if snapshots_with_screenshots %}
     <div class="bg-white rounded-lg shadow p-6">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Screenshots Gallery</h3>
-            <span class="text-sm text-gray-500">{{ snapshots_with_screenshots|length }} screenshot{{ snapshots_with_screenshots|length|pluralize }}</span>
+            <h3 class="text-lg font-semibold text-gray-800">Recent Screenshots</h3>
+            <span class="text-sm text-gray-500">{{ snapshots_with_screenshots|length }} total</span>
         </div>
-        
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {% for snapshot in snapshots_with_screenshots|slice:":6" %}
-            <div class="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow">
-                <!-- Thumbnail -->
-                <div class="aspect-video bg-gray-100 relative group">
-                    <img src="{{ snapshot.screenshot.url }}" 
-                         alt="Screenshot of {{ site.name }} taken on {{ snapshot.taken_at|date:'Y-m-d H:i' }}"
+            <div class="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow group">
+                <div class="aspect-video bg-gray-100 relative">
+                    <img src="{{ snapshot.screenshot.url }}"
+                         alt="Screenshot {{ snapshot.taken_at|date:'Y-m-d H:i' }}"
                          class="w-full h-full object-cover cursor-pointer"
-                         onclick="openImageModal('{{ snapshot.screenshot.url }}', 'Taken: {{ snapshot.taken_at|date:"Y-m-d H:i:s" }} | HTTP: {{ snapshot.http_status_code }}')">
-                    <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                        <span class="bg-white text-gray-800 px-3 py-1 rounded-full text-sm shadow-lg">
-                            <i class="fas fa-search-plus mr-1"></i>Click to enlarge
+                         onclick="openImageModal('{{ snapshot.screenshot.url }}', '{{ snapshot.taken_at|date:"Y-m-d H:i:s" }} | HTTP {{ snapshot.http_status_code }}')">
+                    <div class="absolute top-2 right-2 flex gap-1">
+                        {% if snapshot.is_baseline %}
+                        <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-purple-600 text-white">
+                            <i class="fas fa-star"></i>
                         </span>
-                    </div>
-                </div>
-                
-                <!-- Metadata -->
-                <div class="p-4">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="text-sm text-gray-600">
-                            <i class="far fa-calendar-alt mr-1"></i>{{ snapshot.taken_at|date:"Y-m-d H:i" }}
-                        </span>
-                        <span class="px-2 py-1 text-xs font-medium rounded-full
-                            {% if snapshot.http_status_code == 200 %}bg-green-100 text-green-800
-                            {% elif snapshot.http_status_code >= 400 %}bg-red-100 text-red-800
-                            {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                        {% endif %}
+                        <span class="px-2 py-0.5 text-xs font-medium rounded-full
+                            {% if snapshot.http_status_code == 200 %}bg-green-600 text-white
+                            {% elif snapshot.http_status_code >= 400 %}bg-red-600 text-white
+                            {% else %}bg-yellow-600 text-white{% endif %}">
                             {{ snapshot.http_status_code }}
                         </span>
                     </div>
-                    <div class="text-xs text-gray-500 flex justify-between">
-                        <span><i class="far fa-clock mr-1"></i>{{ snapshot.taken_at|timesince }} ago</span>
-                        {% if snapshot.content_length %}
-                        <span><i class="fas fa-file-alt mr-1"></i>{{ snapshot.content_length|filesizeformat }}</span>
-                        {% endif %}
-                    </div>
-                    {% if snapshot.is_baseline %}
-                    <div class="mt-2">
-                        <span class="px-2 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800">
-                            <i class="fas fa-star mr-1"></i>Baseline
-                        </span>
-                    </div>
-                    {% endif %}
-                    <!-- Enlarge button for gallery -->
-                    <div class="mt-2 grid grid-cols-2 gap-2">
-                        <button onclick="openImageModal('{{ snapshot.screenshot.url }}', 'Taken: {{ snapshot.taken_at|date:"Y-m-d H:i:s" }} | HTTP: {{ snapshot.http_status_code }}')" 
-                                class="text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded text-xs">
-                            <i class="fas fa-search-plus mr-1"></i>Enlarge
-                        </button>
-                        {% if not snapshot.is_baseline %}
-                        <button onclick="setExistingAsBaseline({{ snapshot.id }})" 
-                                class="text-purple-600 hover:text-purple-800 bg-purple-50 px-2 py-1 rounded text-xs">
-                            <i class="fas fa-star mr-1"></i>Set Baseline
-                        </button>
-                        {% else %}
-                        <span class="text-purple-600 bg-purple-50 px-2 py-1 rounded text-xs text-center">
-                            <i class="fas fa-check mr-1"></i>Baseline
-                        </span>
-                        {% endif %}
-                    </div>
                 </div>
+                <div class="p-3 text-xs text-gray-600 flex justify-between">
+                    <span><i class="far fa-clock mr-1"></i>{{ snapshot.taken_at|timesince }} ago</span>
+                    {% if snapshot.content_length %}<span>{{ snapshot.content_length|filesizeformat }}</span>{% endif %}
+                </div>
+                {% if not snapshot.is_baseline %}
+                <div class="px-3 pb-3">
+                    <button onclick="setExistingAsBaseline({{ snapshot.id }})"
+                            class="w-full text-purple-600 bg-purple-50 hover:bg-purple-100 rounded px-2 py-1 text-xs">
+                        <i class="fas fa-star mr-1"></i>Set as Baseline
+                    </button>
+                </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
-        
         {% if snapshots_with_screenshots|length > 6 %}
         <div class="mt-4 text-center">
-            <a href="#snapshots" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                View all {{ snapshots_with_screenshots|length }} screenshots
+            <a href="#snapshots" class="text-blue-600 hover:underline text-sm font-medium">
+                View all {{ snapshots_with_screenshots|length }} in history →
             </a>
         </div>
         {% endif %}
     </div>
     {% endif %}
 
-    <!-- Snapshots History with Small Pictures and Enlarge Buttons -->
+    <!-- ================================================================
+         SNAPSHOT HISTORY
+         ================================================================ -->
     <div class="bg-white rounded-lg shadow p-6" id="snapshots">
-        <h3 class="text-lg font-semibold text-gray-800 mb-4">Snapshot History</h3>
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Snapshot History</h3>
+            {% if snapshots %}<span class="text-sm text-gray-500">{{ snapshots|length }} records</span>{% endif %}
+        </div>
 
         {% if snapshots %}
         <div class="overflow-x-auto">
-            <table class="min-w-full">
+            <table class="min-w-full text-sm">
                 <thead>
-                    <tr class="border-b">
-                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">HTTP Status</th>
-                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Taken At</th>
-                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Time Ago</th>
-                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Content Length</th>
-                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Baseline</th>
-                        <th class="text-left py-3 px-4 text-sm font-medium text-gray-500">Actions</th>
-                     </tr>
+                    <tr class="border-b text-left text-xs uppercase tracking-wide text-gray-500">
+                        <th class="py-3 px-3">Status</th>
+                        <th class="py-3 px-3">Taken</th>
+                        <th class="py-3 px-3">Ago</th>
+                        <th class="py-3 px-3">Size</th>
+                        <th class="py-3 px-3">Baseline</th>
+                        <th class="py-3 px-3">Actions</th>
+                    </tr>
                 </thead>
                 <tbody>
                     {% for snapshot in snapshots %}
                     <tr class="border-b hover:bg-gray-50">
-                        <td class="py-3 px-4">
-                            <span class="px-2 py-1 text-xs font-medium rounded-full
+                        <td class="py-2 px-3">
+                            <span class="px-2 py-0.5 text-xs font-medium rounded-full
                                 {% if snapshot.http_status_code == 200 %}bg-green-100 text-green-800
                                 {% elif snapshot.http_status_code >= 400 %}bg-red-100 text-red-800
                                 {% else %}bg-yellow-100 text-yellow-800{% endif %}">
                                 {{ snapshot.http_status_code }}
                             </span>
                         </td>
-                        <td class="py-3 px-4 text-sm">{{ snapshot.taken_at|date:"Y-m-d H:i:s" }}</td>
-                        <td class="py-3 px-4 text-sm">{{ snapshot.taken_at|timesince }} ago</td>
-                        <td class="py-3 px-4 text-sm">{{ snapshot.content_length|default:"N/A" }}</td>
-                        <td class="py-3 px-4 text-sm">
+                        <td class="py-2 px-3 text-gray-700 whitespace-nowrap">{{ snapshot.taken_at|date:"Y-m-d H:i:s" }}</td>
+                        <td class="py-2 px-3 text-gray-500 whitespace-nowrap">{{ snapshot.taken_at|timesince }} ago</td>
+                        <td class="py-2 px-3 text-gray-600">{{ snapshot.content_length|filesizeformat|default:"—" }}</td>
+                        <td class="py-2 px-3">
                             {% if snapshot.is_baseline %}
-                            <span class="text-purple-600"><i class="fas fa-check-circle"></i> Yes</span>
+                            <span class="text-purple-600 text-xs font-medium"><i class="fas fa-check-circle mr-1"></i>Yes</span>
                             {% else %}
-                            <span class="text-gray-400">No</span>
+                            <span class="text-gray-400 text-xs">No</span>
                             {% endif %}
                         </td>
-                        <td class="py-3 px-4 text-sm">
-                            {% if snapshot.screenshot %}
-                            <div class="flex flex-col space-y-2">
-                                <div class="flex items-center space-x-2">
-                                    <!-- Small thumbnail -->
-                                    <img src="{{ snapshot.screenshot.url }}" 
-                                         alt="Thumbnail" 
-                                         class="w-12 h-12 object-cover rounded border cursor-pointer"
-                                         onclick="openImageModal('{{ snapshot.screenshot.url }}', 'Snapshot from {{ snapshot.taken_at|date:"Y-m-d H:i:s" }} | HTTP: {{ snapshot.http_status_code }}')">
-                                    <!-- Enlarge button -->
-                                    <button onclick="openImageModal('{{ snapshot.screenshot.url }}', 'Snapshot from {{ snapshot.taken_at|date:"Y-m-d H:i:s" }} | HTTP: {{ snapshot.http_status_code }}')" 
-                                            class="text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded text-xs">
-                                        <i class="fas fa-search-plus mr-1"></i>Enlarge
-                                    </button>
-                                </div>
-                                <!-- Set Baseline button (only if not already baseline) -->
-                                {% if not snapshot.is_baseline %}
-                                <button onclick="setExistingAsBaseline({{ snapshot.id }})" 
-                                        class="text-purple-600 hover:text-purple-800 bg-purple-50 px-2 py-1 rounded text-xs w-full">
-                                    <i class="fas fa-star mr-1"></i>Set as Baseline
+                        <td class="py-2 px-3">
+                            <div class="flex items-center gap-2">
+                                {% if snapshot.screenshot %}
+                                <img src="{{ snapshot.screenshot.url }}" alt="thumb"
+                                     class="w-10 h-10 object-cover rounded border cursor-pointer"
+                                     onclick="openImageModal('{{ snapshot.screenshot.url }}', '{{ snapshot.taken_at|date:"Y-m-d H:i:s" }} | HTTP {{ snapshot.http_status_code }}')">
+                                <button onclick="openImageModal('{{ snapshot.screenshot.url }}', '{{ snapshot.taken_at|date:"Y-m-d H:i:s" }} | HTTP {{ snapshot.http_status_code }}')"
+                                        class="text-blue-600 hover:bg-blue-50 px-2 py-1 rounded text-xs">
+                                    <i class="fas fa-search-plus"></i>
                                 </button>
                                 {% else %}
-                                <span class="text-purple-600 bg-purple-50 px-2 py-1 rounded text-xs text-center block">
-                                    <i class="fas fa-check mr-1"></i>Current Baseline
-                                </span>
+                                <span class="text-gray-400 text-xs">—</span>
+                                {% endif %}
+                                {% if not snapshot.is_baseline %}
+                                <button onclick="setExistingAsBaseline({{ snapshot.id }})"
+                                        class="text-purple-600 hover:bg-purple-50 px-2 py-1 rounded text-xs whitespace-nowrap">
+                                    <i class="fas fa-star mr-1"></i>Set Baseline
+                                </button>
                                 {% endif %}
                             </div>
-                            {% else %}
-                            <span class="text-gray-400">No screenshot</span>
-                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -550,25 +473,26 @@
             </table>
         </div>
         {% else %}
-        <p class="text-center text-gray-500 py-4">No snapshots available</p>
+        <p class="text-center text-gray-500 py-6">No snapshots yet. Click "New Snapshot" to create one.</p>
         {% endif %}
     </div>
+
 </div>
 
-<!-- Image Modal -->
+<!-- ================================================================
+     MODAL + SCRIPTS (unchanged behavior)
+     ================================================================ -->
 <div id="imageModal" class="fixed inset-0 bg-black bg-opacity-75 hidden z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeImageModal()">
     <div class="relative max-w-6xl max-h-screen">
         <button onclick="closeImageModal()" class="absolute -top-10 right-0 text-white hover:text-gray-300 text-2xl">
             <i class="fas fa-times"></i>
         </button>
         <img id="modalImage" src="" alt="Screenshot" class="max-w-full max-h-[90vh] rounded-lg shadow-2xl">
-        <div id="modalCaption" class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm rounded-b-lg">
-        </div>
+        <div id="modalCaption" class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm rounded-b-lg"></div>
     </div>
 </div>
 
 <script>
-// Function to get CSRF token from cookies
 function getCookie(name) {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {
@@ -583,22 +507,17 @@ function getCookie(name) {
     }
     return cookieValue;
 }
-
 const csrftoken = getCookie('csrftoken');
 
 function openImageModal(imageUrl, caption) {
-    console.log("Opening modal with image:", imageUrl);
     const modal = document.getElementById('imageModal');
     const modalImg = document.getElementById('modalImage');
     const modalCaption = document.getElementById('modalCaption');
-    
     if (modal && modalImg) {
         modalImg.src = imageUrl;
         modalCaption.innerHTML = caption || '';
         modal.classList.remove('hidden');
         document.body.style.overflow = 'hidden';
-    } else {
-        console.error("Modal elements not found");
     }
 }
 
@@ -614,108 +533,50 @@ function triggerNewSnapshot() {
     if (confirm('Trigger a new snapshot for {{ site.name }}?')) {
         fetch('/api/v1/snapshots/', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': csrftoken
-            },
-            body: JSON.stringify({
-                name: '{{ site.name }}',
-                set_as_baseline: false
-            })
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ name: '{{ site.name }}', set_as_baseline: false })
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
             if (data.status === 'success') {
-                alert('✅ New snapshot triggered successfully! Job ID: ' + data.jobs.screenshot.id);
+                alert('✅ New snapshot triggered! Job ID: ' + data.jobs.screenshot.id);
                 setTimeout(() => window.location.reload(), 3000);
             } else {
                 alert('❌ Error: ' + data.message);
             }
         })
-        .catch(error => {
-            alert('❌ Error: ' + error);
-        });
+        .catch(e => alert('❌ Error: ' + e));
     }
 }
 
 function setExistingAsBaseline(snapshotId) {
-    if (confirm('Set this existing snapshot as the new baseline? This will unset the current baseline.')) {
+    if (confirm('Set this snapshot as the new baseline?')) {
         fetch(`/api/v1/snapshots/${snapshotId}/set-baseline/`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': csrftoken
-            },
-            body: JSON.stringify({
-                set_as_baseline: true
-            })
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ set_as_baseline: true })
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
             if (data.status === 'success') {
-                alert('✅ Snapshot set as baseline successfully!');
+                alert('✅ Snapshot set as baseline.');
                 window.location.reload();
             } else {
                 alert('❌ Error: ' + data.message);
             }
         })
-        .catch(error => {
-            alert('❌ Error: ' + error);
-        });
+        .catch(e => alert('❌ Error: ' + e));
     }
 }
 
-// Close with Escape key
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-        closeImageModal();
-    }
-});
-
-// Debug: Check if modal exists on page load
-document.addEventListener('DOMContentLoaded', function() {
-    const modal = document.getElementById('imageModal');
-    if (modal) {
-        console.log("Modal found and ready");
-    } else {
-        console.error("Modal not found in DOM");
-    }
-});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeImageModal(); });
 </script>
 
 <style>
-/* Add smooth transitions for the modal */
-#imageModal {
-    transition: opacity 0.3s ease;
-}
-
-#imageModal.hidden {
-    display: none;
-}
-
-/* Ensure images don't drag accidentally */
-img {
-    user-select: none;
-    -webkit-user-drag: none;
-}
-
-/* Hover effects for gallery images */
-.aspect-video img:hover {
-    transform: scale(1.02);
-    transition: transform 0.2s;
-}
-
-/* Small thumbnail styling */
-.w-12.h-12 {
-    width: 3rem;
-    height: 3rem;
-    object-fit: cover;
-    border: 1px solid #e5e7eb;
-}
-
-.w-12.h-12:hover {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-}
+#imageModal { transition: opacity 0.3s ease; }
+#imageModal.hidden { display: none; }
+img { user-select: none; -webkit-user-drag: none; }
+.aspect-video img:hover { transform: scale(1.02); transition: transform 0.2s; }
 </style>
+{% endwith %}
 {% endblock %}

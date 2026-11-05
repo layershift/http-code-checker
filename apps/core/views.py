@@ -60,14 +60,31 @@ class ServerListView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return Server.objects.annotate(
+        queryset = Server.objects.annotate(
             site_count=Count('domains'),
             active_site_count=Count('domains', filter=Q(domains__is_active=True))
-        ).order_by('name')
+        )
+
+        # Search by hostname (Server.name), description, and optionally IP
+        search = self.request.GET.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(description__icontains=search) |
+                Q(ip_address__icontains=search)
+            )
+
+        return queryset.order_by('name')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['total_servers'] = Server.objects.count()
+        # Expose the current search so the template can repopulate the input
+        context['current_search'] = self.request.GET.get('search', '')
+        # Expose the current querystring so pagination links can preserve the filter
+        params = self.request.GET.copy()
+        params.pop('page', None)
+        context['querystring'] = params.urlencode()
         return context
 
 
